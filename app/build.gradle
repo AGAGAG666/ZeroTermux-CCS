@@ -557,6 +557,15 @@ afterEvaluate {
     }
 }
 
+// bootstrap ZIP 被 NDK 的 .incbin 直接读取，不能只挂在 Java 编译任务上。
+// CI 使用 --parallel；缓存为空时，buildNdkBuild* 可能抢在 javaCompile/downloadBootstraps
+// 前启动并报 bootstrap-ARCH.zip 不存在。显式建立依赖，确保冷缓存构建也可靠。
+tasks.configureEach { t ->
+    if (t.name ==~ /^(configure|build)NdkBuild.*$/) {
+        t.dependsOn(tasks.named("downloadBootstraps"))
+    }
+}
+
 // ZeroTermux add {@ cc-switch 产物必须先于 assets/jniLibs 合并落位。
 // AGP 8 的 merge* 任务是惰性创建的，afterEvaluate 里 tasks.findByName 可能取不到
 // 而静默跳过——那会打出一个没有 sidecar 的 APK。用 configureEach 按名匹配，
