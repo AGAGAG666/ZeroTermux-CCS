@@ -1,6 +1,7 @@
 package com.termux.zerocore.ccs;
 
 import android.annotation.SuppressLint;
+import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -45,12 +46,15 @@ import java.util.concurrent.Executors;
 public class CcsSwitchActivity extends AppCompatActivity
         implements CcsHostBridge.Host, CcsSidecar.Listener {
     private static final String TAG = "CcsSwitchActivity";
+    static final String EXTRA_DEEP_LINK = "com.termux.extra.CCS_DEEP_LINK";
     /** 前端请求重启时，判定「刚重启过可直接复用」的时间窗。 */
     private static final long RESTART_REUSE_WINDOW_MS = 5_000L;
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
+    private final Object deepLinkLock = new Object();
 
+    @Nullable private String pendingDeepLink;
     @Nullable private WebView web;
     @Nullable private CcsHostBridge bridge;
     @Nullable private ProgressBar spinner;
@@ -66,6 +70,7 @@ public class CcsSwitchActivity extends AppCompatActivity
     @SuppressLint("SetJavaScriptEnabled")
     @Override protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        acceptDeepLinkIntent(getIntent());
 
         FrameLayout root = new FrameLayout(this);
         root.setLayoutParams(new ViewGroup.LayoutParams(
@@ -149,6 +154,38 @@ public class CcsSwitchActivity extends AppCompatActivity
         // 注册要早于启动：首启期间若 sidecar 立刻按 51 退出，自愈后的通知也不该漏掉。
         CcsSidecar.get(this).addListener(this);
         startSidecar();
+    }
+
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        acceptDeepLinkIntent(intent);
+    }
+
+    private void acceptDeepLinkIntent(@Nullable Intent intent) {
+        if (intent == null) return;
+        String url = intent.getStringExtra(EXTRA_DEEP_LINK);
+        intent.removeExtra(EXTRA_DEEP_LINK);
+        if (!CcsDeepLinkValidator.isSupported(url)) return;
+
+        synchronized (deepLinkLock) {
+            // 确认弹窗同一时间只能展示一条；连续点击时保留最新链接，避免旧链接滞留。
+            pendingDeepLink = url;
+        }
+        notifyPendingDeepLink();
+    }
+
+    /**
+     * 不把 URL 拼入 JavaScript，避免 query 中的 apiKey 进入控制台或脚本错误；
+     * 前端只收到一个“现在可以拉取”的通知，实际值经 JavascriptInterface 一次性读取。
+     */
+    private void notifyPendingDeepLink() {
+        main.post(() -> {
+            if (web == null) return;
+            web.evaluateJavascript(
+                "window.__ccsPullPendingDeepLink&&window.__ccsPullPendingDeepLink();",
+                null);
+        });
     }
 
     private void startSidecar() {
@@ -237,6 +274,15 @@ public class CcsSwitchActivity extends AppCompatActivity
             }
         }
         return b.toString();
+    }
+
+    @Nullable
+    @Override public String takePendingDeepLink() {
+        synchronized (deepLinkLock) {
+            String url = pendingDeepLink;
+            pendingDeepLink = null;
+            return url;
+        }
     }
 
     @Override public void requestClose() {

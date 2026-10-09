@@ -149,7 +149,25 @@
             android:exported="false"
             android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout"
             android:label="@string/cc_switch_title"
+            android:launchMode="singleTop"
             android:theme="@style/Theme.AppCompat.NoActionBar" />
+
+        <activity
+            android:name=".zerocore.ccs.CcsDeepLinkActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:host="v1"
+                    android:path="/import"
+                    android:scheme="ccswitch" />
+            </intent-filter>
+        </activity>
 
         <service
             android:name=".zerocore.ccs.CcsSidecarService"

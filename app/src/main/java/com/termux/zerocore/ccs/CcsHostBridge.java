@@ -34,6 +34,7 @@ public final class CcsHostBridge {
     /** 前端发起的目录选择请求 id → 由 Activity 完成后回调 JS。 */
     public interface Host {
         void requestFolderPick(int requestId);
+        @Nullable String takePendingDeepLink();
         void requestClose();
         void requestMinimize();
         void requestRestartSidecar();
@@ -99,6 +100,12 @@ public final class CcsHostBridge {
     @JavascriptInterface
     public String homeDir() {
         return com.termux.shared.termux.TermuxConstants.TERMUX_HOME_DIR_PATH;
+    }
+
+    @Nullable
+    @JavascriptInterface
+    public String takePendingDeepLink() {
+        return host.takePendingDeepLink();
     }
 
     @JavascriptInterface
