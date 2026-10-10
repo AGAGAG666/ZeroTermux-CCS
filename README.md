@@ -1,125 +1,157 @@
 # ZeroTermux-CCS
 
-ZeroTermux-CCS 是 ZeroTermux 的一个 Android 改版，内置了 CC Switch。它把供应商管理、本地路由和 Termux 放在同一个应用里。
+ZeroTermux-CCS 是 ZeroTermux 的非官方 Android 定制版本，把 CC Switch 的 Web 页面、provider 管理、本地路由、Skills 和 Termux 集成在同一个 APK 中。本项目与 ZeroTermux 上游、CC Switch 上游和 OpenAI Codex 均无从属关系，也未获得其背书。
 
-本项目是非官方 fork，与 ZeroTermux、CC Switch 和 OpenAI Codex 没有从属关系，也没有得到这些项目的背书。
+## 当前正式版本
 
-## 目前发布的版本
+- 应用版本：`0.118.3.63`
+- ZeroTermux 目标上游：`fd6d21418843bafa2c5c16885f13c796969387a2`
+- 当前正式 Release 目标提交：`226a1f44dc0461376aebca5b38be57728f2a8c0c`
+- CC Switch 原版上游：`v3.20.0`
+- CC Switch Android 资产：`ccs-android-f3291ac6`
+- ZeroTermux-CCS Release：`ccs-f3291ac6`
+- APK：`ZeroTermux-0.118.3.63-release_arm64-v8a.apk`
+- 当前 CCS sidecar 架构：`arm64-v8a`
 
-- APK 版本：`0.118.3.63`
-- CC Switch：上游 `v3.20.0`
-- CC Switch Android 产物：`ccs-android-2f8353d`
-- ZeroTermux Release：`ccs-2f8353d`
-- 支持架构：当前只有 `arm64-v8a` 包含 sidecar
-
-正式 Release 中有两个 arm64 包：
-
-- `ZeroTermux-0.118.3.63-debug_arm64-v8a.apk`
-- `ZeroTermux-0.118.3.63-release_arm64-v8a.apk`
-
-从 [Releases](https://github.com/AGAGAG666/ZeroTermux-CCS/releases) 下载对应文件。覆盖安装前，建议先备份 `~`。
-
-> 应用包名仍是 `com.termux`，因此它不能和官方 Termux 或其他同包名版本并存。sidecar 要求 Android 7.0（API 24）或更高版本；低于 API 24 时，终端功能仍可用，但 CC Switch 页面不能启动。
+正式 APK 从本仓库 [Releases](https://github.com/AGAGAG666/ZeroTermux-CCS/releases) 获取。
 
 ## 使用 CC Switch
 
-从侧边栏打开 **CC Switch**。第一次进入时，ZeroTermux 会启动 sidecar 前台服务，并在 WebView 中打开本地页面。通知栏会显示 sidecar 状态。
+从 ZeroTermux 主菜单打开 **CC Switch**。宿主会启动 sidecar 前台服务，并在 WebView 中加载 CC Switch 页面。
 
-CC Switch 使用上游 React 前端。供应商、模型、路由、使用统计、连通性测试、Skills 和同步功能都由 CC Switch 处理。
+### 本地端口
 
-### 供应商配置
+- Web 页面默认端口：`17132`，可在 ZeroTermux 设置中修改；浏览器可访问 `http://localhost:17132/`。
+- Codex/OpenCode 路由代理端口：`15721`，本地客户端通常访问 `http://127.0.0.1:15721/v1`。
+
+`17132` 是 Web 端口，不是路由端口。
+
+### `ccswitch://v1/import`
+
+当前版本支持从浏览器或其他应用打开 `ccswitch://v1/import`。Android 入口只负责校验和转发，CC Switch 仍使用原有解析与确认弹窗；用户确认后才写入 provider、prompt、MCP 或 Skill。
+
+导入链接可能包含 `apiKey`。不要把完整 URI 放进日志、截图、Issue 或文档；已公开的 key 应立即轮换。
+
+### Provider 与路由
 
 CC Switch 使用 Termux 中已有的配置目录：
 
 | 路径 | 用途 |
 | --- | --- |
-| `~/.cc-switch/` | CC Switch 数据库、供应商和运行设置 |
+| `~/.cc-switch/` | CC Switch 数据库、provider 和运行设置 |
 | `~/.codex/config.toml` | Codex 配置 |
 | `~/.codex/auth.json` | Codex 认证信息 |
 | `~/.claude/` | Claude Code 配置 |
 
-切换供应商后，新启动的 CLI 进程会读取新的配置。模型目录或 CLI 已经加载的配置，可能需要重启对应 CLI；通常不需要重启整个 Termux。
+供应商上游使用 OpenAI Chat Completions 或 Anthropic Messages 时，可由本地路由转换为 Codex Responses；上游本身支持 Responses 时可直接转发。协议选择以 provider 的 `apiFormat` 为准，不根据模型名称或 URL 猜测。
 
-### 路由代理
+### Skills
 
-Codex 使用 Responses API。供应商上游如果使用 OpenAI Chat Completions 或 Anthropic Messages，需要在 CC Switch 中打开 Codex 路由，让本地代理完成格式转换。上游本身支持 Responses 时，CC Switch 直接转发。
-
-模型映射由供应商配置决定。遇到请求格式错误时，先检查供应商的 API 格式、模型 ID、模型映射和路由状态，再看上游返回的 `cause`。
+Skills 管理页沿用 CC Switch 页面。Android 构建只增加窄屏和触控适配：顶部操作允许换行，Skill 名称/描述与应用开关分层显示，不另写原生 Skills UI。
 
 ### Codex 终端
 
-Codex 仍然在普通 Termux 会话中运行：
+Codex 继续在普通 Termux 会话中运行：
 
 ```bash
 codex
 ```
 
-当前版本不维护独立的 Codex 专属终端和右侧 Codex 历史会话列表。会话文件仍由 Codex 自己保存，恢复或切换请使用 Codex CLI 的会话功能。
+当前项目不维护独立 Codex 专属终端或自定义 Codex 历史列表。会话恢复和切换使用 Codex CLI 自身功能。
 
 ## 架构
 
 ```text
 ZeroTermux APK
-├── Termux 终端
-├── CcsSwitchActivity + WebView
-├── libccsidecar.so       # Rust sidecar
-└── assets/ccs-web.zip    # CC Switch 前端
-
-sidecar
-├── 本地代理
-├── Responses / Chat / Anthropic 转换
-├── SQLite 数据库 ~/.cc-switch/cc-switch.db
-└── /rpc 与 /events 本地接口
+├─ Termux 终端
+├─ CcsDeepLinkActivity        # 公开、仅接收 ccswitch://v1/import
+├─ CcsSwitchActivity          # 私有 WebView 宿主
+├─ CcsSidecarService          # 前台服务
+├─ lib/arm64-v8a/libccsidecar.so
+└─ assets/ccs-web.zip
+         ↓
+CC Switch sidecar
+├─ Web / RPC / SSE
+├─ 本地路由代理
+├─ Responses / Chat / Anthropic 转换
+└─ SQLite 数据库 ~/.cc-switch/cc-switch.db
 ```
 
-sidecar 先解包前端，再启动本地 HTTP 服务。服务输出端口和 token，WebView 使用同一个地址访问页面、RPC 和 SSE。APK 内的 `libccsidecar.so` 和 `ccs-web.zip` 由 Gradle 按 tag、SHA-256 和文件大小校验。
+`CcsSwitchActivity` 保持 `exported=false`。外部 deep link 先进入 `CcsDeepLinkActivity`，校验后通过一次性 bridge 交给前端；完整 URI 不进入 Log 或 JavaScript 字符串。
 
-## 常见问题
+APK 中的 `libccsidecar.so` 和 `ccs-web.zip` 由 `app/build.gradle` 按 Release Tag、文件大小和 SHA-256 下载校验。Web 包哈希还用于隔离覆盖安装后的旧 Web 缓存。
 
-| 现象 | 先检查什么 |
-| --- | --- |
-| CC Switch 白屏或打不开 | 通知栏是否有 sidecar；重新打开页面前先确认服务没有被系统杀掉 |
-| 上游返回 HTML 400 | 检查 endpoint、API 格式、请求头和模型；HTML 通常说明网关在返回 JSON 前就拒绝了请求 |
-| 返回 JSON 400 | 看错误里的 `cause`，重点检查 `tools`、思考字段、消息顺序和模型能力 |
-| 切换供应商后模型没变 | 检查模型映射和 Codex 当前进程；模型目录更新通常需要重启 Codex |
-| 代理开关打开但请求没走本地 | 检查 `~/.codex/config.toml` 是否指向 `127.0.0.1:15721`，再确认 sidecar 端口是否监听 |
-| 文件选择器闪退或目录打不开 | 检查目录权限和路径是否位于 Termux 可访问范围；不要直接把几十 GB 的 home 当作一次性扫描目录 |
+## 当前资产
+
+| 文件 | 大小 | SHA-256 |
+| --- | ---: | --- |
+| `ccs-web.zip` | 2,080,953 bytes | `5b446fa6eda7ab209b7ffa5dabb731b363a8dfd55fc82f56ba9b459d362b021b` |
+| `libccsidecar.so` | 17,133,944 bytes | `668330a171b699704c380ae979d146d9ae9d99ecb630fca05fa17d922af040f4` |
+| `ZeroTermux-0.118.3.63-release_arm64-v8a.apk` | 92,855,139 bytes | `92fba34afe7df43fe6735a6cfc82250096e4d59b2f6da4a33519220fcb497df3` |
+
+APK 内两个 CCS 资产已与 CC Switch Release 和 `app/build.gradle` 三方比对一致。
 
 ## 主要源码位置
 
 | 路径 | 内容 |
 | --- | --- |
 | `app/src/main/java/com/termux/zerocore/ccs/CcsSidecar.java` | sidecar 生命周期、前端解包和握手 |
-| `app/src/main/java/com/termux/zerocore/ccs/CcsSidecarService.java` | 前台服务和保活 |
-| `app/src/main/java/com/termux/zerocore/ccs/CcsSwitchActivity.java` | WebView 宿主 |
-| `app/src/main/java/com/termux/zerocore/ccs/CcsHostBridge.java` | JavaScript 与 Android 桥接 |
-| `app/src/main/java/com/termux/zerocore/ccs/CcsDirectoryPicker.java` | 目录选择器 |
-| `terminal-emulator/`、`terminal-view/` | 终端模拟器和显示层 |
-| `app/build.gradle` | CCS 产物 tag、SHA-256、size 和 APK 集成 |
+| `app/src/main/java/com/termux/zerocore/ccs/CcsSidecarService.java` | 前台服务 |
+| `app/src/main/java/com/termux/zerocore/ccs/CcsSwitchActivity.java` | 私有 WebView 宿主和 deep-link 队列 |
+| `app/src/main/java/com/termux/zerocore/ccs/CcsDeepLinkActivity.java` | 自定义 scheme 入口和转发 |
+| `app/src/main/java/com/termux/zerocore/ccs/CcsDeepLinkValidator.java` | URI 范围校验 |
+| `app/src/main/java/com/termux/zerocore/ccs/CcsHostBridge.java` | JavaScript 与 Android bridge |
+| `app/src/main/java/com/termux/zerocore/ccs/CcsDirectoryPicker.java` | Termux 私有目录选择器 |
+| `app/build.gradle` | CCS 资产锁定、bootstrap、APK 集成 |
 
-## 构建和发布
+## 构建与发布
 
-本地需要完整 Android SDK/NDK。手机上优先使用 GitHub Actions：
+Android APK 统一使用 GitHub Actions。当前仓库和分支：
 
 ```bash
 gh workflow run build.yml \
-  -R AGAGAG666/ZeroTermux \
+  --repo AGAGAG666/ZeroTermux-CCS \
   --ref feature/ccs-full-port \
   -f arch=arm64 \
-  -f build_debug=true \
+  -f build_debug=false \
   -f build_release=true
 ```
 
-常用工作流：
+正式发布前必须检查：
 
-| 文件 | 用途 |
+- Workflow 最终结论；
+- APK 包名、版本和 ABI；
+- Manifest 中的 `ccswitch://v1/import`；
+- APK 内 `ccs-web.zip` 和 `libccsidecar.so`；
+- Release、Gradle、APK 内文件三方大小和 SHA-256；
+- 手机上的 deep link 和相关 UI。
+
+`downloadBootstraps` 必须先于 `configureNdkBuild*`、`buildNdkBuild*`。否则并行 Gradle 在冷缓存时可能先进入 NDK，并因缺少 `bootstrap-ARCH.zip` 失败。
+
+## 已验证基线
+
+- Android Frontend Build：`37899238675`，成功；
+- Android Sidecar Build：`37899238650`，成功；
+- Build APK：`37912713632`，成功；
+- 真机：`ccswitch://v1/import` 可用；
+- 真机：Skills 管理页窄屏显示正常。
+
+本轮没有重新覆盖与改动无关的所有 provider、路由、文件提供器和错误码场景；修改相应区域时应重新取得对应证据。
+
+## 常见问题
+
+| 现象 | 先检查什么 |
 | --- | --- |
-| `.github/workflows/build.yml` | 构建 APK |
-| `.github/workflows/unit-tests.yml` | Android 单元测试 |
-| `.github/workflows/publish-release.yml` | 发布 Debug 和 Release APK |
-| `.github/workflows/ccs-core-probe.yml` | 检查 CCS 原生依赖的 Android 交叉编译 |
+| Web 页面打不开 | 当前 Web 端口、sidecar 前台服务和 `/health` |
+| `ccswitch://` 无法拉起 | 安装版本是否含 `CcsDeepLinkActivity`，URI 是否精确匹配 `/v1/import` |
+| 能拉起但没有确认框 | APK 中 Web 包是否含 deep-link bridge，sidecar 是否注册 `parse_deeplink` |
+| 请求没有走本地代理 | 客户端是否指向 `127.0.0.1:15721/v1`，路由开关和 provider 是否启用 |
+| 上游返回 400/401/403 | `apiFormat`、模型映射、转换后请求和上游响应 `cause` |
+| 文件选择失败 | 路径是否位于 Termux 可访问的真实文件系统范围 |
 
-Actions artifact 名称里保留 `Nightly`，例如 `ZeroTermux-Nightly_release_arm64-v8a`。这是 CI 内部名称；正式 Release 文件不会带这个前缀。
+## 文档范围
+
+本仓库的 README/AGENTS 记录源码仓库当前实现与开发规则。外部项目架构、跨仓库 SOP 和交接状态位于 `~/工作区/codex/Termux/`。收到笼统的“更新文档”请求时，先确认更新仓库文档还是外部交接文档。
 
 ## 许可证
 
