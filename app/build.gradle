@@ -413,20 +413,21 @@ clean {
 
 // ZeroTermux add {@ cc-switch Android sidecar 产物拉取
 // 产物由 AGAGAG666/cc-switch 的 Android CI 交叉编译产生，按 tag + SHA-256 钉死。
-// 不入库（16MB 原生可执行 + 2MB 前端站点），构建时下载到 app/ccs-artifacts/ 并校验。
-ext.ccsArtifactTag = "ccs-android-f3291ac6"
+// 原生可执行和 Web 包不入库，构建时准备到 app/ccs-artifacts/ 并校验。
+// Unpublished V4 test assets are provided only through CCS_ARTIFACT_DIR.
+ext.ccsArtifactTag = "ccs-ci-b391b0d0"
 ext.ccsArtifacts = [
     [
         name    : "libccsidecar.so",
         dest    : "ccs-artifacts/jniLibs/arm64-v8a/libccsidecar.so",
-        sha256  : "668330a171b699704c380ae979d146d9ae9d99ecb630fca05fa17d922af040f4",
-        size    : 17133944L
+        sha256  : "b766b70bc14d807af3c7bbe55b1b49792a1e81b68c6cb11c5dca6463392dc557",
+        size    : 21670848L
     ],
     [
         name    : "ccs-web.zip",
         dest    : "ccs-artifacts/assets/ccs-web.zip",
-        sha256  : "5b446fa6eda7ab209b7ffa5dabb731b363a8dfd55fc82f56ba9b459d362b021b",
-        size    : 2080953L
+        sha256  : "cd3f6e46b122c0d2f9322833d3a059b5db8ce7989035ebc675dff852692c69f3",
+        size    : 2502630L
     ]
 ]
 

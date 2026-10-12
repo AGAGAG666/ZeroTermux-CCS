@@ -22,6 +22,21 @@ on:
         description: '编译 Release 版本'
         type: boolean
         default: true
+      ccs_web_run:
+        description: 'V4 测试 Web CI Run ID（空值使用正式资产）'
+        required: false
+        type: string
+        default: ''
+      ccs_sidecar_run:
+        description: 'V4 测试 Sidecar CI Run ID'
+        required: false
+        type: string
+        default: ''
+      ccs_source_sha:
+        description: '两份 CCS CI 资产的完整提交 SHA'
+        required: false
+        type: string
+        default: ''
   workflow_call:
     inputs:
       arch:
@@ -35,6 +50,18 @@ on:
         required: false
         type: boolean
         default: true
+      ccs_web_run:
+        required: false
+        type: string
+        default: ''
+      ccs_sidecar_run:
+        required: false
+        type: string
+        default: ''
+      ccs_source_sha:
+        required: false
+        type: string
+        default: ''
     secrets:
       KEY_ALIAS:
         required: false
@@ -46,6 +73,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
 
     env:
       JAVA_VERSION: "17"
@@ -59,6 +89,45 @@ jobs:
         uses: actions/checkout@v6
         with:
           submodules: recursive
+
+      - name: 测试 CCS CI 资产校验逻辑
+        if: ${{ startsWith(github.ref_name, 'test/ccs-v4') || inputs.ccs_web_run != '' || inputs.ccs_sidecar_run != '' || inputs.ccs_source_sha != '' }}
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          TMPDIR: ${{ runner.temp }}
+        run: python3 -m unittest discover -s .github/scripts -p 'test_prepare_ccs_test_assets.py' -v
+
+      - name: 接入同提交 CCS CI 测试资产
+        if: ${{ startsWith(github.ref_name, 'test/ccs-v4') || inputs.ccs_web_run != '' || inputs.ccs_sidecar_run != '' || inputs.ccs_source_sha != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PYTHONDONTWRITEBYTECODE: '1'
+          CCS_WEB_RUN: ${{ inputs.ccs_web_run }}
+          CCS_SIDECAR_RUN: ${{ inputs.ccs_sidecar_run }}
+          CCS_SOURCE_SHA: ${{ inputs.ccs_source_sha }}
+          CCS_ARCH: ${{ inputs.arch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$CCS_ARCH" == arm64 ]]
+          [[ "$CCS_WEB_RUN" =~ ^[0-9]+$ ]]
+          [[ "$CCS_SIDECAR_RUN" =~ ^[0-9]+$ ]]
+          [[ "$CCS_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          work="$RUNNER_TEMP/ccs-ci-input"
+          mkdir -p "$work"
+          gh api "repos/AGAGAG666/cc-switch/actions/runs/$CCS_WEB_RUN" > "$work/web-run.json"
+          gh api "repos/AGAGAG666/cc-switch/actions/runs/$CCS_SIDECAR_RUN" > "$work/sidecar-run.json"
+          python3 .github/scripts/prepare_ccs_test_assets.py \
+            --web-run-json "$work/web-run.json" --sidecar-run-json "$work/sidecar-run.json" \
+            --source-sha "$CCS_SOURCE_SHA" --validate-only
+          gh run download "$CCS_WEB_RUN" -R AGAGAG666/cc-switch --name ccs-android-web --dir "$work/web"
+          gh run download "$CCS_SIDECAR_RUN" -R AGAGAG666/cc-switch --name ccs-sidecar_arm64-v8a --dir "$work/sidecar"
+          python3 .github/scripts/prepare_ccs_test_assets.py \
+            --web-run-json "$work/web-run.json" --sidecar-run-json "$work/sidecar-run.json" \
+            --source-sha "$CCS_SOURCE_SHA" --web-zip "$work/web/ccs-web.zip" \
+            --sidecar "$work/sidecar/cc-switch" --output-dir "$work/prepared" \
+            --gradle app/build.gradle
+          echo "CCS_ARTIFACT_DIR=$work/prepared" >> "$GITHUB_ENV"
 
       - name: 配置 JDK ${{ env.JAVA_VERSION }}
         uses: actions/setup-java@v5
