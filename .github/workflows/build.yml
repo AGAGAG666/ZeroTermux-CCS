@@ -163,6 +163,24 @@ jobs:
             x86_64)    echo "abi=x86_64" >> $GITHUB_OUTPUT ;;
           esac
 
+      - name: SQL 系统文件选择专项单测
+        if: ${{ startsWith(github.ref_name, 'test/ccs-v4') }}
+        run: >-
+          ./gradlew --build-cache --stacktrace :app:testReleaseUnitTest
+          --tests 'com.termux.zerocore.ccs.CcsSqlImport*Test'
+          -Darch=arm64
+
+      - name: 核对 SQL 专项单测报告
+        if: ${{ startsWith(github.ref_name, 'test/ccs-v4') }}
+        run: >-
+          python3 -c 'from pathlib import Path; import xml.etree.ElementTree as E;
+          reports=list(Path("app/build/test-results/testReleaseUnitTest").glob("TEST-com.termux.zerocore.ccs.CcsSqlImport*Test.xml"));
+          assert len(reports)==4, "Expected four SQL test class reports";
+          roots=[E.parse(p).getroot() for p in reports];
+          totals={k:sum(int(r.get(k,"0")) for r in roots) for k in ("tests","failures","errors","skipped")};
+          assert totals=={"tests":39,"failures":0,"errors":0,"skipped":0}, totals;
+          print("SQL_TEST_RESULTS="+str(totals))'
+
       - name: 编译 APK (${{ inputs.arch }})
         run: |
           TASKS=""

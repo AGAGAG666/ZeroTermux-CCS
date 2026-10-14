@@ -34,6 +34,10 @@ public final class CcsHostBridge {
     /** 前端发起的目录选择请求 id → 由 Activity 完成后回调 JS。 */
     public interface Host {
         void requestFolderPick(int requestId);
+        void requestFilePick(String requestId);
+        boolean beginSqlImport(String path);
+        void endSqlImport(String path);
+        void releaseSqlImport(String path);
         @Nullable String takePendingDeepLink();
         void requestClose();
         void requestMinimize();
@@ -95,6 +99,29 @@ public final class CcsHostBridge {
     @JavascriptInterface
     public void pickFolder(int requestId) {
         host.requestFolderPick(requestId);
+    }
+
+    @JavascriptInterface
+    public void pickFile(String requestId) {
+        if (requestId == null || requestId.length() > 96
+            || !requestId.matches("[A-Za-z0-9-]+")) return;
+        host.requestFilePick(requestId);
+    }
+
+    /** Synchronous pin before the frontend sends import_config_from_file. */
+    @JavascriptInterface
+    public boolean beginSqlImport(String path) {
+        return host.beginSqlImport(path);
+    }
+
+    @JavascriptInterface
+    public void endSqlImport(String path) {
+        host.endSqlImport(path);
+    }
+
+    @JavascriptInterface
+    public void releaseSqlImport(String path) {
+        host.releaseSqlImport(path);
     }
 
     @JavascriptInterface

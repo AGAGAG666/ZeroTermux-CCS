@@ -2,7 +2,12 @@ package com.termux.zerocore.ccs;
 
 import android.annotation.SuppressLint;
 import android.content.Intent;
+import android.database.Cursor;
+import android.net.Uri;
+import android.provider.OpenableColumns;
 import android.os.Bundle;
+import android.os.CancellationSignal;
+import android.os.ParcelFileDescriptor;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
@@ -21,6 +26,8 @@ import android.widget.TextView;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 
+import java.io.File;
+import java.io.InputStream;
 import java.io.IOException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -66,10 +73,19 @@ public class CcsSwitchActivity extends AppCompatActivity
      * 故所有变更都经 {@code main.post} 归拢到主线程，无需额外同步）。
      */
     private boolean restarting;
+    private static final int SQL_FILE_REQUEST_CODE = 0x4343;
+    private static final String SQL_SELECTOR_PENDING = "ccs.sql.selector.pending";
+    private CcsSqlImportCache sqlCache;
+    private CcsSqlImportLifecycle sqlImports;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        sqlCache = CcsSqlImportCache.shared(new File(getCacheDir(), "ccs-sql-import"));
+        sqlImports = new CcsSqlImportLifecycle(sqlCache);
+        if (savedInstanceState != null && savedInstanceState.getBoolean(SQL_SELECTOR_PENDING)) {
+            sqlImports.restoreSelector();
+        }
         acceptDeepLinkIntent(getIntent());
 
         FrameLayout root = new FrameLayout(this);
@@ -104,6 +120,10 @@ public class CcsSwitchActivity extends AppCompatActivity
         bridge = new CcsHostBridge(this, this);
         view.addJavascriptInterface(bridge, "__CCS_NATIVE__");
         view.setWebViewClient(new WebViewClient() {
+            @Override public void onPageStarted(WebView v, String url, android.graphics.Bitmap icon) {
+                sqlImports.reload();
+            }
+
             @Override public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest req) {
                 String url = req.getUrl() != null ? req.getUrl().toString() : "";
                 // 只允许在 WebView 内导航到 sidecar 自己的源；外链交给系统浏览器，
@@ -245,6 +265,146 @@ public class CcsSwitchActivity extends AppCompatActivity
         });
     }
 
+    @Override public boolean beginSqlImport(String path) {
+        return sqlImports.begin(path);
+    }
+
+    @Override public void endSqlImport(String path) {
+        sqlCache.end(path);
+    }
+
+    @Override public void releaseSqlImport(String path) {
+        sqlCache.release(path);
+    }
+
+    @Override public void requestFilePick(String requestId) {
+        // Capture the page before posting: an old Binder call cannot acquire a new page's slot.
+        CcsSqlImportLifecycle.Request incoming = sqlImports.request(requestId);
+        main.post(() -> {
+            if (!sqlImports.current(incoming) || isFinishing() || isDestroyed()) return;
+            CcsSqlImportLifecycle.Request request = sqlImports.select(incoming);
+            if (request == null) {
+                resolveFilePick(incoming, null, sqlImports.hasSelector()
+                    ? "系统文件选择器仍未返回，请先完成或取消原选择"
+                    : "已有 SQL 文件正在复制，请稍候");
+                return;
+            }
+            try {
+                Intent picker = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                picker.addCategory(Intent.CATEGORY_OPENABLE);
+                picker.setType("*/*");
+                picker.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                startActivityForResult(picker, SQL_FILE_REQUEST_CODE);
+            } catch (RuntimeException e) {
+                sqlImports.selectionFailed(request);
+                resolveFilePick(request, null, "无法打开安卓系统文件选择器");
+            }
+        });
+    }
+
+    @Override protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != SQL_FILE_REQUEST_CODE) return;
+        onSqlFilePicked(resultCode == RESULT_OK && data != null ? data.getData() : null);
+    }
+
+    private void onSqlFilePicked(@Nullable Uri uri) {
+        CcsSqlImportLifecycle.Request request = sqlImports.selected();
+        if (request == null) return; // An old selector is consumed, never reassigned.
+        if (uri == null || !"content".equals(uri.getScheme())) {
+            sqlImports.finish(request);
+            resolveFilePick(request, null, uri == null ? null : "系统未返回可读取的文档");
+            return;
+        }
+        // Retain the signal for both cancellable ContentResolver operations, not just the read loop.
+        CancellationSignal signal = new CancellationSignal();
+        request.task.onProviderCancel(signal::cancel);
+        boolean submitted = request.task.submit(() -> copySqlFile(request, uri, signal),
+            CcsSqlImportTask.TIMEOUT_MS, () -> main.post(() -> {
+                if (!sqlImports.finish(request)) return;
+                resolveFilePick(request, null, "读取 SQL 文件超时，请选择本地文件后重试");
+            }));
+        if (!submitted) {
+            sqlImports.finish(request);
+            resolveFilePick(request, null, "文件提供程序仍被阻塞，复制线程已满，请稍后重试");
+        }
+    }
+
+    private void copySqlFile(CcsSqlImportLifecycle.Request request, Uri uri, CancellationSignal signal) {
+        CcsSqlImportCache.Reservation reservation = null;
+        File copy = null;
+        String error = null;
+        try {
+            request.task.check();
+            // Scanning old cache and reserving quota both happen off the main thread.
+            reservation = sqlImports.reserve(request);
+            String displayName = null;
+            Cursor cursor = getContentResolver().query(uri,
+                new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null, signal);
+            try (Cursor owned = cursor) {
+                request.task.track(owned);
+                if (owned != null && owned.moveToFirst()) {
+                    int column = owned.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                    if (column >= 0) displayName = owned.getString(column);
+                }
+            } finally {
+                request.task.untrack(cursor);
+            }
+            request.task.check();
+            ParcelFileDescriptor descriptor = getContentResolver().openFileDescriptor(uri, "r", signal);
+            try (ParcelFileDescriptor owned = descriptor) {
+                request.task.track(owned);
+                if (owned == null) throw new IOException("Document has no descriptor");
+                InputStream input = new ParcelFileDescriptor.AutoCloseInputStream(owned);
+                try (InputStream stream = input) {
+                    request.task.track(stream);
+                    copy = reservation.copy(stream, displayName, request.task);
+                } finally {
+                    request.task.untrack(input);
+                }
+            } finally {
+                request.task.untrack(descriptor);
+            }
+            request.task.check();
+        } catch (CcsSqlImportFile.InvalidFileException e) {
+            error = e.getMessage();
+        } catch (IOException | RuntimeException e) {
+            error = "无法读取所选 SQL 文件，请确认文件仍存在且允许访问";
+        } finally {
+            if (error != null && reservation != null) {
+                reservation.abort();
+                copy = null;
+            }
+        }
+        File result = copy;
+        String failure = error;
+        main.post(() -> {
+            if (!sqlImports.finishCopy(request) || isFinishing() || isDestroyed()) {
+                if (result != null) sqlCache.release(result.getAbsolutePath());
+                return;
+            }
+            resolveFilePick(request, result == null ? null : result.getAbsolutePath(), failure);
+        });
+    }
+
+    private void resolveFilePick(CcsSqlImportLifecycle.Request request,
+                                 @Nullable String path, @Nullable String error) {
+        main.post(() -> {
+            if (!sqlImports.current(request) || web == null || isFinishing() || isDestroyed()) {
+                if (path != null) sqlCache.release(path);
+                return;
+            }
+            web.evaluateJavascript(
+                "window.__ccsResolveFilePick&&window.__ccsResolveFilePick("
+                    + sqlPickJsString(request.id) + "," + sqlPickJsString(path) + ","
+                    + sqlPickJsString(error) + ");", null);
+        });
+    }
+
+    private static String sqlPickJsString(@Nullable String value) {
+        return value == null ? "null" : "\"" + jsEscape(value) + "\"";
+    }
+
     /** 把选择结果回送给前端挂起的 Promise。{@code null} 等价用户取消。 */
     private void resolveFolderPick(int requestId, @Nullable String path) {
         main.post(() -> {
@@ -370,7 +530,13 @@ public class CcsSwitchActivity extends AppCompatActivity
         super.onBackPressed();
     }
 
+    @Override protected void onSaveInstanceState(Bundle outState) {
+        outState.putBoolean(SQL_SELECTOR_PENDING, sqlImports.hasSelector());
+        super.onSaveInstanceState(outState);
+    }
+
     @Override protected void onDestroy() {
+        sqlImports.destroy();
         CcsSidecar.get(this).removeListener(this);
         // sidecar 故意不随页面关闭而停止：它同时承载路由代理（codex/opencode 的
         // 上游转换），终端里的 CLI 仍在用。停止由 CcsSidecarService 统一负责。
