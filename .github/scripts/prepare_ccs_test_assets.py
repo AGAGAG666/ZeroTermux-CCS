@@ -1,4 +1,4 @@
-"""Validate paired CC Switch CI assets for an unpublished ZeroTermux test APK."""
+"""Validate paired CC Switch CI assets against candidate or release Gradle pins."""
 import argparse
 import hashlib
 import json
@@ -9,7 +9,8 @@ import zipfile
 from pathlib import Path
 
 REPOSITORY = "AGAGAG666/cc-switch"
-BRANCH = "android-sidecar-v4-test"
+BRANCH = "android-sidecar"
+TRUSTED_EVENTS = ("push", "workflow_dispatch")
 WORKFLOWS = {
     "web": ".github/workflows/android-frontend-build.yml",
     "sidecar": ".github/workflows/android-sidecar-build.yml",
@@ -22,7 +23,7 @@ def validate_pair(web, sidecar, source_sha):
     for kind, run in (("web", web), ("sidecar", sidecar)):
         if run.get("repository", {}).get("full_name") != REPOSITORY:
             raise ValueError(f"{kind}: unexpected source repository")
-        if run.get("head_branch") != BRANCH or run.get("event") != "workflow_dispatch":
+        if run.get("head_branch") != BRANCH or run.get("event") not in TRUSTED_EVENTS:
             raise ValueError(f"{kind}: unexpected branch or event")
         if run.get("path", "").split("@", 1)[0] != WORKFLOWS[kind]:
             raise ValueError(f"{kind}: unexpected source workflow")
@@ -86,10 +87,13 @@ def validate_elf(data):
 
 
 def validate_gradle(path, source_sha, artifacts):
+    if not re.fullmatch(r"[0-9a-f]{40}", source_sha):
+        raise ValueError("source SHA must be a full lowercase Git commit hash")
     text = path.read_text()
     tag = re.search(r'ext\.ccsArtifactTag\s*=\s*"([^"]+)"', text)
-    if not tag or tag.group(1) != "ccs-ci-" + source_sha[:8]:
-        raise ValueError("Gradle test asset tag does not match the CI source commit")
+    allowed_tags = {prefix + source_sha[:8] for prefix in ("ccs-ci-", "ccs-android-")}
+    if not tag or tag.group(1) not in allowed_tags:
+        raise ValueError("Gradle asset tag must be ccs-ci-<SHA8> or ccs-android-<SHA8> for the CI source commit")
     for name, metadata in artifacts.items():
         pattern = (r'name\s*:\s*"' + re.escape(name) + r'"\s*,\s*dest\s*:\s*"[^"]+"'
                    r'\s*,\s*sha256\s*:\s*"([0-9a-f]{64})"\s*,\s*size\s*:\s*(\d+)L')

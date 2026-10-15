@@ -23,12 +23,12 @@ on:
         type: boolean
         default: true
       ccs_web_run:
-        description: 'V4 测试 Web CI Run ID（空值使用正式资产）'
+        description: 'Web CI Run ID（三项全填且仅 arm64；全空使用 Release 资产）'
         required: false
         type: string
         default: ''
       ccs_sidecar_run:
-        description: 'V4 测试 Sidecar CI Run ID'
+        description: '同提交 Sidecar CI Run ID'
         required: false
         type: string
         default: ''
@@ -91,14 +91,13 @@ jobs:
           submodules: recursive
 
       - name: 测试 CCS CI 资产校验逻辑
-        if: ${{ startsWith(github.ref_name, 'test/ccs-v4') || inputs.ccs_web_run != '' || inputs.ccs_sidecar_run != '' || inputs.ccs_source_sha != '' }}
         env:
           PYTHONDONTWRITEBYTECODE: '1'
           TMPDIR: ${{ runner.temp }}
-        run: python3 -m unittest discover -s .github/scripts -p 'test_prepare_ccs_test_assets.py' -v
+        run: python3 -m unittest discover -s .github/scripts -p 'test_*.py' -v
 
-      - name: 接入同提交 CCS CI 测试资产
-        if: ${{ startsWith(github.ref_name, 'test/ccs-v4') || inputs.ccs_web_run != '' || inputs.ccs_sidecar_run != '' || inputs.ccs_source_sha != '' }}
+      - name: 接入同提交 CCS CI 资产
+        if: ${{ inputs.ccs_web_run != '' || inputs.ccs_sidecar_run != '' || inputs.ccs_source_sha != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
           PYTHONDONTWRITEBYTECODE: '1'
@@ -164,14 +163,12 @@ jobs:
           esac
 
       - name: SQL 系统文件选择专项单测
-        if: ${{ startsWith(github.ref_name, 'test/ccs-v4') }}
         run: >-
           ./gradlew --build-cache --stacktrace :app:testReleaseUnitTest
           --tests 'com.termux.zerocore.ccs.CcsSqlImport*Test'
           -Darch=arm64
 
       - name: 核对 SQL 专项单测报告
-        if: ${{ startsWith(github.ref_name, 'test/ccs-v4') }}
         run: >-
           python3 -c 'from pathlib import Path; import xml.etree.ElementTree as E;
           reports=list(Path("app/build/test-results/testReleaseUnitTest").glob("TEST-com.termux.zerocore.ccs.CcsSqlImport*Test.xml"));
@@ -209,12 +206,11 @@ jobs:
 
       - name: 上传 Release APK (${{ steps.abi.outputs.abi }})
         if: ${{ inputs.build_release && inputs.arch != 'all' }}
-        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: ZeroTermux-Nightly_release_${{ steps.abi.outputs.abi }}
           path: app/build/outputs/apk/release/*.apk
-          if-no-files-found: ignore
+          if-no-files-found: error
 
       # all 模式下按架构分别上传，避免打包成一个 zip
       - name: 上传 Debug APK (universal)
@@ -260,41 +256,36 @@ jobs:
 
       - name: 上传 Release APK (universal)
         if: ${{ inputs.build_release && inputs.arch == 'all' }}
-        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: ZeroTermux-Nightly_release_universal
           path: app/build/outputs/apk/release/*_universal.apk
-          if-no-files-found: ignore
+          if-no-files-found: error
       - name: 上传 Release APK (armeabi-v7a)
         if: ${{ inputs.build_release && inputs.arch == 'all' }}
-        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: ZeroTermux-Nightly_release_armeabi-v7a
           path: app/build/outputs/apk/release/*_armeabi-v7a.apk
-          if-no-files-found: ignore
+          if-no-files-found: error
       - name: 上传 Release APK (arm64-v8a)
         if: ${{ inputs.build_release && inputs.arch == 'all' }}
-        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: ZeroTermux-Nightly_release_arm64-v8a
           path: app/build/outputs/apk/release/*_arm64-v8a.apk
-          if-no-files-found: ignore
+          if-no-files-found: error
       - name: 上传 Release APK (x86)
         if: ${{ inputs.build_release && inputs.arch == 'all' }}
-        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: ZeroTermux-Nightly_release_x86
           path: app/build/outputs/apk/release/*_x86.apk
-          if-no-files-found: ignore
+          if-no-files-found: error
       - name: 上传 Release APK (x86_64)
         if: ${{ inputs.build_release && inputs.arch == 'all' }}
-        continue-on-error: true
         uses: actions/upload-artifact@v7
         with:
           name: ZeroTermux-Nightly_release_x86_64
           path: app/build/outputs/apk/release/*_x86_64.apk
-          if-no-files-found: ignore
+          if-no-files-found: error

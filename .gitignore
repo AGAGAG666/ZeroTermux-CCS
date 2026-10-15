@@ -47,3 +47,6 @@ ccs-core-probe/target/
 app/ccs-artifacts/
 # 本地 CI 产物缓存
 .ci-artifact/
+
+# Local Python caches from CI helper verification
+.github/scripts/__pycache__/
