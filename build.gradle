@@ -7,7 +7,10 @@ buildscript {
         google()
         // ZeroTermux add {@
         maven { url 'https://jitpack.io' }
-        maven { url "https://repo.eclipse.org/content/repositories/paho-snapshots/" }
+        maven {
+            url "https://repo.eclipse.org/content/repositories/paho-snapshots/"
+            content { includeGroup "org.eclipse.paho" }
+        }
         //maven { url 'https://maven.aliyun.com/nexus/content/groups/public/' }
         maven { setUrl("https://maven.aliyun.com/repository/public") }
         maven { setUrl("https://maven.aliyun.com/repository/google") }
@@ -30,7 +33,10 @@ allprojects {
         mavenCentral()
         maven { url "https://jitpack.io" }
         // ZeroTermux add {@
-        maven { url "https://repo.eclipse.org/content/repositories/paho-snapshots/" }
+        maven {
+            url "https://repo.eclipse.org/content/repositories/paho-snapshots/"
+            content { includeGroup "org.eclipse.paho" }
+        }
         //maven { url 'https://maven.aliyun.com/nexus/content/groups/public/' }
         maven { setUrl("https://maven.aliyun.com/repository/public") }
         maven { setUrl("https://maven.aliyun.com/repository/google") }
