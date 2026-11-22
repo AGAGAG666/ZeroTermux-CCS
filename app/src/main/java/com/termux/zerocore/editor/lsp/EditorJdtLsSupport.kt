@@ -1,6 +1,7 @@
 package com.termux.zerocore.editor.lsp
 
 import com.termux.shared.termux.TermuxConstants
+import com.termux.zerocore.http.HTTPIP
 import java.io.File
 import java.security.MessageDigest
 
@@ -11,16 +12,23 @@ import java.security.MessageDigest
 object EditorJdtLsSupport {
     const val PACKAGE_ID = "java-jdtls"
 
-    /** 较稳妥的 milestone；体积约 46MB。需要 JDK 21+。 */
+    const val JDTLS_ARCHIVE = "jdt-language-server-1.44.0-202501221502.tar.gz"
+
+    /** ICDOWN 镜像（优先）。 */
+    const val MIRROR_DOWNLOAD_URL = "${HTTPIP.ZT_DOWNLOAD_BASE}/eclipse_lsp/$JDTLS_ARCHIVE"
+
+    /** Eclipse 官方源（镜像失效时回退）；体积约 46MB。需要 JDK 21+。 */
     const val DEFAULT_DOWNLOAD_URL =
-        "https://download.eclipse.org/jdtls/milestones/1.44.0/jdt-language-server-1.44.0-202501221502.tar.gz"
+        "https://download.eclipse.org/jdtls/milestones/1.44.0/$JDTLS_ARCHIVE"
 
     private const val INSTALL_DIR_NAME = "jdtls"
     private const val CONFIG_RUNTIME_DIR_NAME = "jdtls-config"
     private const val DATA_DIR_NAME = "jdtls-data"
     const val INIT_TIMEOUT_MILLIS = 120_000L
-    /** 补全请求超时：过长会导致编辑器补全面板进度条一直转。 */
-    const val COMPLETION_TIMEOUT_MILLIS = 8_000L
+    /** 补全请求超时：过长会导致编辑器补全面板进度条一直转；过短则开启复杂补全时易空白。 */
+    const val COMPLETION_TIMEOUT_MILLIS = 12_000L
+    /** 转到定义 / 引用 / class 源码拉取：JDK 类型首次解析较慢。 */
+    const val NAVIGATION_TIMEOUT_MILLIS = 25_000L
 
     fun installDir(): File = File(EditorLspInstaller.baseDir(), INSTALL_DIR_NAME)
 
@@ -193,12 +201,16 @@ object EditorJdtLsSupport {
         }
     }
 
-    fun installShellScript(downloadUrl: String = DEFAULT_DOWNLOAD_URL): String {
+    fun installShellScript(
+        mirrorUrl: String = MIRROR_DOWNLOAD_URL,
+        fallbackUrl: String = DEFAULT_DOWNLOAD_URL
+    ): String {
         val baseQ = shellQuote(EditorLspInstaller.baseDir().absolutePath)
         val installQ = shellQuote(installDir().absolutePath)
         val tmpTarQ = shellQuote(File(EditorLspInstaller.baseDir(), "jdtls-download.tar.gz").absolutePath)
         val configRuntimeQ = shellQuote(File(EditorLspInstaller.baseDir(), CONFIG_RUNTIME_DIR_NAME).absolutePath)
-        val urlQ = shellQuote(downloadUrl)
+        val mirrorQ = shellQuote(mirrorUrl)
+        val fallbackQ = shellQuote(fallbackUrl)
         return """
             set -e
             export HOME=${shellQuote(TermuxConstants.TERMUX_HOME_DIR_PATH)}
@@ -216,10 +228,23 @@ object EditorJdtLsSupport {
             echo '[ZeroTermux Editor] Downloading Eclipse JDT Language Server...'
             rm -rf $installQ
             mkdir -p $installQ
-            if command -v curl >/dev/null 2>&1; then
-              curl -L --fail -o $tmpTarQ $urlQ
-            else
-              wget -O $tmpTarQ $urlQ
+            download_ok=0
+            for url in $mirrorQ $fallbackQ; do
+              echo "[ZeroTermux Editor] Try download: ${'$'}url"
+              if command -v curl >/dev/null 2>&1; then
+                if curl -fL --connect-timeout 30 --max-time 3600 -o $tmpTarQ "${'$'}url"; then
+                  download_ok=1
+                  break
+                fi
+              elif wget -q --timeout=30 -O $tmpTarQ "${'$'}url"; then
+                download_ok=1
+                break
+              fi
+              echo "[ZeroTermux Editor] Download failed: ${'$'}url"
+            done
+            if [ "${'$'}download_ok" != 1 ]; then
+              echo 'jdt-ls download failed (mirror and official fallback)'
+              exit 1
             fi
             tar -xzf $tmpTarQ -C $installQ
             rm -f $tmpTarQ

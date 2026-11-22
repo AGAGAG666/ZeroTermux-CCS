@@ -478,6 +478,7 @@ error</string>
     <string name="语言切换">Language</string>
     <string name="中文">Chinese</string>
     <string name="English">English</string>
+    <string name="Indonesian">Bahasa Indonesia</string>
     <string name="取消">Cancel</string>
     <string name="termux_x11">termux-x11</string>
 
@@ -844,6 +845,14 @@ Reset successfully</string>
     <string name="editor_toolbar_redo">Redo</string>
     <string name="editor_toolbar_more">More actions</string>
     <string name="editor_toolbar_terminal">Shell</string>
+    <string name="editor_toolbar_format">Format code</string>
+    <string name="editor_toolbar_duplicate_line">Duplicate line</string>
+    <string name="editor_toolbar_keyboard">Show keyboard</string>
+    <string name="editor_toolbar_goto_def">Go to definition mode</string>
+    <string name="editor_toolbar_goto_def_on">Tap a symbol to open its definition. Tap the button again to exit.</string>
+    <string name="editor_toolbar_extra_toggle">Terminal / GUI bar</string>
+    <string name="editor_toolbar_extra_show">Show Terminal / GUI bar</string>
+    <string name="editor_toolbar_extra_hide">Hide Terminal / GUI bar</string>
     <string name="editor_terminal_title">Terminal</string>
     <string name="editor_terminal_hide">Hide terminal</string>
     <string name="editor_toolbar_run">Run</string>
@@ -948,6 +957,7 @@ Reset successfully</string>
     <string name="editor_settings_lsp_supported_languages">Supports: %1$s</string>
     <string name="editor_settings_lsp_status_not_installed">Not installed</string>
     <string name="editor_settings_lsp_action_install">Tap to install</string>
+    <string name="editor_settings_lsp_action_retry">Tap to retry</string>
     <string name="editor_settings_lsp_action_installed">Ready</string>
     <string name="editor_settings_lsp_required_badge">Recommended</string>
     <string name="editor_lsp_install_prompt_title">Language assist</string>
@@ -973,7 +983,11 @@ Reset successfully</string>
     <string name="editor_lsp_references_title">References (%1$d)</string>
     <string name="editor_lsp_references_for">References: %1$s</string>
     <string name="editor_lsp_hover_for">Info: %1$s</string>
+    <string name="editor_lsp_format_done">Code formatted</string>
+    <string name="editor_lsp_format_failed">Format failed</string>
     <string name="editor_lsp_working">Working…</string>
+    <string name="editor_lsp_goto_loading">Going to definition, please wait…</string>
+    <string name="editor_lsp_goto_loading_close">Close</string>
     <string name="editor_lsp_install_prompt_cancel">Cancel</string>
     <string name="editor_lsp_install_prompt_never">Don\'t ask again</string>
     <string name="editor_unsaved_title">Unsaved file</string>
@@ -1053,6 +1067,14 @@ Reset successfully</string>
     <string name="menu_create_project_python">PYTHON</string>
     <string name="menu_create_project_php">PHP</string>
     <string name="menu_create_project_npm">NPM</string>
+    <string name="menu_create_project_vscode">VS Code</string>
+    <string name="menu_vscode_install_title">Installing environment</string>
+    <string name="menu_vscode_install_message">Installing VS Code Server (code-server) in the terminal. This may take a while.\n\nWhen finished, tap VS Code again to open it.\n\nYou can also open it externally:\n%1$s</string>
+    <string name="menu_vscode_open_message">Starting VS Code Server, entering soon…\nExternal address: %1$s</string>
+    <string name="menu_vscode_open_builtin">Built-in browser</string>
+    <string name="menu_vscode_open_external">External browser</string>
+    <string name="menu_vscode_opening_browser">Opening VS Code in the built-in browser…</string>
+    <string name="menu_vscode_loading_enter">Starting VS Code, entering soon…\nPlease wait, do not close</string>
     <string name="menu_open_project">Open</string>
     <string name="beautification_function">UI</string>
     <string name="online_features">Online</string>
@@ -1084,7 +1106,7 @@ Reset successfully</string>
     <string name="bottom_keyboard_settings">Set keyboard rules</string>
     <string name="bottom_keyboard_settings_note">Enter personalized keyboard rules to improve input efficiency</string>
     <string name="log_output">Output LOG to memory card</string>
-    <string name="log_output_note">Output the LOG file to\n[/xinhao/ZeroTermuxLog/ZeroTermux.log]\nIt may affect performance, please enable it with caution!!!!</string>
+    <string name="log_output_note">Writes logs under xinhao/ZeroTermuxLog/\n• ZeroTermux.log — general\n• timer_diag.log — timer schedule/fire/skip (for missed runs)\nAlso ~/.timerdir/log/timer_diag.log\nMay affect performance; enable only when debugging.</string>
     <string name="zt_about">About ZeroTermux</string>
     <string name="zt_about_zerotermux">ZeroTermux GITHUB</string>
     <string name="zt_about_zerotermux_note">Jump to ZeroTermux GITHUB page</string>
@@ -1653,7 +1675,7 @@ cd ~ &amp;&amp; pkg update -y \n
     <string name="zt_agent_ai_terminal_history_notice">[Important] Terminal descriptions in history below may be outdated. Use the terminal snapshot attached to the latest user message; ignore conflicting history.</string>
     <string name="zt_agent_ai_terminal_disabled_prompt">[Terminal permission OFF] You cannot read/control the terminal. For run command / check install / read terminal requests: never claim you ran anything or describe output; tell the user to enable「Allow terminal control」in Configure Agent AI, or paste command output themselves.</string>
     <string name="zt_agent_ai_zt_control_disabled_prompt">[ZeroTermux control OFF] You cannot open pages, change settings, or run zt. For open page / drawer / mirror / beautify requests: never claim done; tell the user to enable「Allow ZeroTermux control」in Configure Agent AI. run_zt_command also needs terminal control ON.</string>
-    <string name="zt_agent_ai_filesystem_system_prompt">You may use filesystem tools to operate disk directly (no terminal; prefer over cat/echo/mkdir/ls):\n1. list_directory — list a directory; path optional (defaults to home).\n2. read_file — read a text file; set max_bytes for large files.\n3. write_file — write/overwrite a text file (creates parent dirs).\n4. create_file — create an empty file; mkdir — create directories (nested OK).\n5. stat_path — check existence, type, size.\n6. delete_path — delete file/dir; requires explicit user consent and user_confirmed=true.\nPaths may be absolute or relative to home; only Termux files and external storage are allowed. Describe file contents ONLY from tool results. Keep using terminal tools for installs and interactive commands.</string>
+    <string name="zt_agent_ai_filesystem_system_prompt">You may use filesystem tools to operate disk directly (no terminal; prefer over cat/echo/mkdir/ls):\n1. list_directory — list a directory; path optional (defaults to home).\n2. read_file — read a text file; set max_bytes for large files.\n3. write_file — write/overwrite a text file (creates parent dirs).\n4. create_file — create an empty file; mkdir — create directories (nested OK).\n5. stat_path — check existence, type, size.\n6. delete_path — delete file/dir; requires explicit user consent and user_confirmed=true.\nPaths: absolute, relative to home, ~/…, or /tmp (→ Termux $PREFIX/tmp). Only Termux files and external storage are allowed. If a tool returns not found, list_directory on home or parent — do not keep guessing similar paths. Describe file contents ONLY from tool results. Keep using terminal tools for installs and interactive commands.</string>
     <string name="zt_agent_ai_filesystem_disabled_prompt">[Filesystem permission OFF] You cannot read/write files directly. For file create/edit/list requests: never claim done; tell the user to enable「Allow direct filesystem access」in Configure Agent AI. If terminal is ON, suggest shell commands, but prefer enabling filesystem access.</string>
     <string name="zt_agent_ai_filesystem_disabled_no_terminal">[Filesystem OFF] Direct file access and terminal are both OFF. For file requests: never claim done; tell the user to enable「Allow direct filesystem access」or「Allow terminal control」in Configure Agent AI.</string>
     <string name="zt_agent_ai_tool_read_terminal">Reading terminal…</string>
@@ -1921,8 +1943,8 @@ cd ~ &amp;&amp; pkg update -y \n
     <string name="editor_build_script_add_commands">Add build/run commands in build.sh</string>
     <string name="editor_build_script_edit_for_file">Edit build.sh to build/run %1$s</string>
     <string name="editor_build_script_current_file">Current file: %1$s</string>
-    <string name="editor_build_script_install_java">[ZeroTermux Editor] Installing OpenJDK…</string>
-    <string name="editor_build_script_install_java_failed">[ZeroTermux Editor] Failed to install OpenJDK</string>
+    <string name="editor_build_script_install_java">[ZeroTermux Editor] Installing OpenJDK 21…</string>
+    <string name="editor_build_script_install_java_failed">[ZeroTermux Editor] Failed to install OpenJDK 21</string>
     <string name="editor_build_script_install_c">[ZeroTermux Editor] Installing C compiler (clang)…</string>
     <string name="editor_build_script_install_c_failed">[ZeroTermux Editor] Failed to install C compiler</string>
     <string name="editor_build_script_install_python">[ZeroTermux Editor] Installing Python…</string>

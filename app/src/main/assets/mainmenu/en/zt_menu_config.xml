@@ -141,6 +141,9 @@
         <item tag="NPM"
             name="NPM"
             click="java:com.termux.zerocore.config.mainmenu.config.CreateNpmProjectClickConfig" />
+        <item tag="VS Code"
+            name="VS Code"
+            click="java:com.termux.zerocore.config.mainmenu.config.CreateVscodeClickConfig" />
         <item tag="Open Project"
             name="Open Project"
             click="java:com.termux.zerocore.config.mainmenu.config.OpenProjectClickConfig" />

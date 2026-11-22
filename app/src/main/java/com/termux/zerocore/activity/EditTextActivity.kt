@@ -83,6 +83,8 @@ import com.termux.zerocore.editor.lsp.EditorLspUris
 import com.termux.zerocore.ftp.utils.UserSetManage
 import io.github.rosemoe.sora.event.ClickEvent
 import io.github.rosemoe.sora.event.ContentChangeEvent
+import io.github.rosemoe.sora.event.InterceptTarget
+import io.github.rosemoe.sora.event.SelectionChangeEvent
 import io.github.rosemoe.sora.lang.Language
 import io.github.rosemoe.sora.lang.diagnostic.DiagnosticsContainer
 import io.github.rosemoe.sora.langs.textmate.TextMateColorScheme
@@ -100,6 +102,7 @@ import io.github.rosemoe.sora.widget.SymbolInputView
 import com.termux.shared.view.KeyboardUtils
 import com.termux.view.TerminalView
 import com.termux.zerocore.editor.EditorIdeaCompletionItemAdapter
+import com.termux.zerocore.editor.EditorLoadingAwareAutoCompletion
 import com.termux.zerocore.editor.SafeEditorDiagnosticTooltipWindow
 import io.github.rosemoe.sora.widget.component.EditorAutoCompletion
 import io.github.rosemoe.sora.widget.component.EditorDiagnosticTooltipWindow
@@ -161,6 +164,7 @@ class EditTextActivity : AppCompatActivity(), ZtEditorAiHost {
         const val EDITOR_PREF_LSP_TIMEOUT = "lsp_timeout"
         /** 前缀 + packageId，值为 true 表示该语言 LSP 安装提示不再弹出 */
         const val EDITOR_PREF_LSP_PROMPT_NEVER_PREFIX = "lsp_prompt_never_"
+        const val EDITOR_PREF_TOOLBAR_SECONDARY_VISIBLE = "toolbar_secondary_visible"
         const val EDITOR_STATE_SIDEBAR_VISIBLE = "sidebar_visible"
         const val EDITOR_STATE_SIDEBAR_SEARCH_PANEL = "sidebar_search_panel"
         const val EDITOR_STATE_SIDEBAR_SEARCH_QUERY = "sidebar_search_query"
@@ -226,6 +230,21 @@ class EditTextActivity : AppCompatActivity(), ZtEditorAiHost {
     private var mEditorSidebarAiButton: TextView? = null
     private var editorAiPanel: ZtEditorAiPanelHelper? = null
     private var mEditorTerminalButton: ImageView? = null
+    private var mEditorFormatButton: ImageView? = null
+    private var mEditorGotoDefButton: ImageView? = null
+    private var mEditorDuplicateLineButton: ImageView? = null
+    private var mEditorKeyboardButton: ImageView? = null
+    private var mEditorToolbarExtraButton: ImageView? = null
+    private var mEditorToolbarSecondary: View? = null
+    private var mEditorToolbarContainer: View? = null
+    private var isToolbarSecondaryVisible = false
+    /** 第二栏「转到定义」点击模式：开启后单击符号跳转定义，关闭后恢复原单击行为。 */
+    private var isGotoDefinitionClickMode = false
+    /** 转到定义进行中：阻塞重复点击，用 Dialog 等待（可关闭取消）。 */
+    private var isLspNavigationInProgress = false
+    private var lspNavLoadingDialog: AlertDialog? = null
+    /** 每次打开加载框递增；关闭/取消后后台结果若 id 不匹配则丢弃。 */
+    private var lspNavRequestId = 0
     private var mEditorRunButton: ImageView? = null
     private var mEditorRunLoading: ProgressBar? = null
     private var editorTerminalPanel: EditorTerminalPanel? = null
@@ -315,7 +334,7 @@ class EditTextActivity : AppCompatActivity(), ZtEditorAiHost {
     private val dirtyCheckHandler = Handler(Looper.getMainLooper())
     private val editorTabs = ArrayList<EditorTab>()
     private var lspContentChangeSubscribed = false
-    private var lspInteractionSubscribed = false
+    private var lspIdentifierHighlightSubscribed = false
     private val lspDocumentChangeRunnable = Runnable { flushLspDocumentChange() }
     private data class LspNavMark(val file: File, val line: Int, val column: Int)
     private val lspNavStack = ArrayDeque<LspNavMark>()
@@ -448,6 +467,8 @@ class EditTextActivity : AppCompatActivity(), ZtEditorAiHost {
         code_editor = findViewById(R.id.code_editor)
         mSaveText = findViewById(R.id.ok)
         mEditorToolbar = findViewById(R.id.editor_toolbar)
+        mEditorToolbarContainer = findViewById(R.id.editor_toolbar_container)
+        mEditorToolbarSecondary = findViewById(R.id.editor_toolbar_secondary)
         mEditorMenuButton = findViewById(R.id.editor_menu)
         mEditorFilesButton = findViewById(R.id.editor_action_files)
         mEditorUndoButton = findViewById(R.id.editor_action_undo)
@@ -456,6 +477,11 @@ class EditTextActivity : AppCompatActivity(), ZtEditorAiHost {
         mEditorAiButton = findViewById(R.id.editor_action_ai)
         mEditorSidebarAiButton = findViewById(R.id.editor_sidebar_ai)
         mEditorTerminalButton = findViewById(R.id.editor_action_terminal)
+        mEditorFormatButton = findViewById(R.id.editor_action_format)
+        mEditorGotoDefButton = findViewById(R.id.editor_action_goto_def)
+        mEditorDuplicateLineButton = findViewById(R.id.editor_action_duplicate_line)
+        mEditorKeyboardButton = findViewById(R.id.editor_action_keyboard)
+        mEditorToolbarExtraButton = findViewById(R.id.editor_action_toolbar_extra)
         mEditorX11Button = findViewById(R.id.editor_action_x11)
         mEditorRunButton = findViewById(R.id.editor_action_run)
         mEditorRunLoading = findViewById(R.id.editor_action_run_loading)
@@ -506,6 +532,11 @@ class EditTextActivity : AppCompatActivity(), ZtEditorAiHost {
             setSoftKeyboardEnabled(true)
             setDisableSoftKbdIfHardKbdAvailable(false)
             isFocusableInTouchMode = true
+            // 慢 LSP（如 JDT 首次补全）先弹出悬浮窗转圈，再填结果
+            replaceComponent(
+                EditorAutoCompletion::class.java,
+                EditorLoadingAwareAutoCompletion(this)
+            )
             getComponent(EditorAutoCompletion::class.java)?.let { autoComplete ->
                 autoComplete.isEnabled = true
                 // IDEA / Android Studio 风格补全列表
@@ -533,15 +564,19 @@ class EditTextActivity : AppCompatActivity(), ZtEditorAiHost {
                     scheduleLspDocumentChange()
                 }
             }
-            if (!lspInteractionSubscribed) {
-                lspInteractionSubscribed = true
-                lspSymbolPopup = EditorLspSymbolPopup(this)
+            if (!lspIdentifierHighlightSubscribed) {
+                lspIdentifierHighlightSubscribed = true
                 subscribeEvent(ClickEvent::class.java) { event, _ ->
-                    if (!lspEnabled || cursor.isSelected) return@subscribeEvent
-                    // 点击标识符：整词高亮(下划线感) + 悬浮窗查引用
-                    maybeOpenReferencesOnClick(event.line, event.column)
+                    if (cursor.isSelected) return@subscribeEvent
+                    // 「转到定义」点击模式：不改变关闭时的原有单击高亮逻辑
+                    if (isGotoDefinitionClickMode) {
+                        handleGotoDefinitionClick(event)
+                        return@subscribeEvent
+                    }
+                    if (!lspEnabled) return@subscribeEvent
+                    // 单击只高亮同名标识符，不弹引用悬浮窗（引用请用菜单）
+                    highlightIdentifierOnClick(event.line, event.column)
                 }
-                // 长按留给系统选区/复制/剪切；悬停信息请用编辑器菜单「悬停」
             }
         }
     }
@@ -596,10 +631,25 @@ class EditTextActivity : AppCompatActivity(), ZtEditorAiHost {
         mEditorTerminalButton?.setOnClickListener {
             editorBottomDock?.openTerminalTab() ?: openTerminalAtDirectory(null)
         }
+        mEditorFormatButton?.setOnClickListener {
+            onFormatCodeClicked()
+        }
+        mEditorGotoDefButton?.setOnClickListener {
+            onGotoDefinitionModeClicked()
+        }
+        mEditorDuplicateLineButton?.setOnClickListener {
+            duplicateCurrentLineOrSelection()
+        }
+        mEditorKeyboardButton?.setOnClickListener {
+            forceShowSoftKeyboard()
+        }
         mEditorX11Button?.setOnClickListener {
             editorAiPanel?.dismissPanel()
             editorBottomDock?.openX11Tab()
             updateEditorX11ButtonState()
+        }
+        mEditorToolbarExtraButton?.setOnClickListener {
+            setToolbarSecondaryVisible(!isToolbarSecondaryVisible, persist = true)
         }
         mEditorMoreButton?.setOnClickListener { view ->
             showEditorMoreMenu(view)
@@ -619,7 +669,23 @@ class EditTextActivity : AppCompatActivity(), ZtEditorAiHost {
         mEditorSvgModeToggle?.setOnClickListener {
             togglePreviewMode()
         }
+        setToolbarSecondaryVisible(isToolbarSecondaryVisible, persist = false)
         updateEditorActionButtons()
+    }
+
+    private fun setToolbarSecondaryVisible(visible: Boolean, persist: Boolean) {
+        isToolbarSecondaryVisible = visible
+        mEditorToolbarSecondary?.visibility = if (visible) View.VISIBLE else View.GONE
+        mEditorToolbarExtraButton?.rotation = if (visible) 180f else 0f
+        mEditorToolbarExtraButton?.contentDescription = getString(
+            if (visible) R.string.editor_toolbar_extra_hide else R.string.editor_toolbar_extra_show
+        )
+        mEditorToolbarExtraButton?.alpha = if (visible) 1f else 0.85f
+        if (persist) {
+            getSharedPreferences(EDITOR_PREF_NAME, Context.MODE_PRIVATE).edit()
+                .putBoolean(EDITOR_PREF_TOOLBAR_SECONDARY_VISIBLE, visible)
+                .apply()
+        }
     }
 
     private fun initEditorAiPanel() {
@@ -967,6 +1033,7 @@ class EditTextActivity : AppCompatActivity(), ZtEditorAiHost {
         }
         refreshActiveAndroidProjectRoot()
         updateAndroidBuildButton()
+        updateJavaLspToolbarButtons()
     }
 
     private fun refreshActiveAndroidProjectRoot() {
@@ -1155,6 +1222,69 @@ class EditTextActivity : AppCompatActivity(), ZtEditorAiHost {
         val editable = tab != null && !tab.previewOnly && !isTextPreviewMode(tab)
         updateToolbarButtonState(mEditorUndoButton, editable && isEditorActionAvailable("undo"))
         updateToolbarButtonState(mEditorRedoButton, editable && isEditorActionAvailable("redo"))
+        updateToolbarButtonState(mEditorDuplicateLineButton, editable)
+        mEditorDuplicateLineButton?.visibility = View.VISIBLE
+        updateToolbarButtonState(mEditorKeyboardButton, true)
+        mEditorKeyboardButton?.visibility = View.VISIBLE
+    }
+
+    /** 强制弹出系统软键盘（外接键盘场景下也可唤起）。 */
+    private fun forceShowSoftKeyboard() {
+        val editor = code_editor ?: return
+        // 若底部 Dock 占着焦点，先清掉，避免软键盘仍挂在终端/GUI 上
+        findViewById<View>(R.id.editor_terminal_input)?.clearFocus()
+        KeyboardUtils.clearDisableSoftKeyboardFlags(this)
+        editor.setSoftKeyboardEnabled(true)
+        editor.setDisableSoftKbdIfHardKbdAvailable(false)
+        editor.isFocusable = true
+        editor.isFocusableInTouchMode = true
+        editor.requestFocus()
+        editor.post {
+            KeyboardUtils.showSoftKeyboard(this, editor)
+            val imm = getSystemService(INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
+            imm?.showSoftInput(editor, android.view.inputmethod.InputMethodManager.SHOW_FORCED)
+        }
+    }
+
+    /**
+     * 复制当前行到下一行（等同 Android Studio Ctrl+D）。
+     * 有选区时复制选区内容并紧跟在选区后插入。
+     */
+    private fun duplicateCurrentLineOrSelection() {
+        val editor = code_editor ?: return
+        val tab = currentTab()
+        if (tab == null || tab.previewOnly || isTextPreviewMode(tab)) return
+        val content = editor.text
+        val cursor = editor.cursor
+        if (cursor.isSelected) {
+            val leftLine = cursor.leftLine
+            val leftCol = cursor.leftColumn
+            val rightLine = cursor.rightLine
+            val rightCol = cursor.rightColumn
+            val selected = content.subContent(leftLine, leftCol, rightLine, rightCol).toString()
+            if (selected.isEmpty()) return
+            content.insert(rightLine, rightCol, selected)
+            // 选中新复制出的那段（与 IDE 连续 Ctrl+D 习惯一致）
+            val indexer = content.indexer
+            val startIndex = indexer.getCharIndex(rightLine, rightCol)
+            val endIndex = startIndex + selected.length
+            val endPos = indexer.getCharPosition(endIndex)
+            editor.setSelectionRegion(rightLine, rightCol, endPos.line, endPos.column)
+        } else {
+            val line = cursor.leftLine
+            val column = cursor.leftColumn
+            val lineText = content.getLineString(line)
+            if (line >= content.lineCount - 1) {
+                content.insert(line, content.getColumnCount(line), "\n$lineText")
+            } else {
+                content.insert(line + 1, 0, "$lineText\n")
+            }
+            val newLine = (line + 1).coerceAtMost(content.lineCount - 1)
+            val newCol = column.coerceIn(0, content.getColumnCount(newLine))
+            editor.setSelection(newLine, newCol)
+        }
+        updateDirtyState()
+        updateEditorActionButtons()
     }
 
     private fun updateToolbarButtonState(button: ImageView?, enabled: Boolean) {
@@ -1171,6 +1301,7 @@ class EditTextActivity : AppCompatActivity(), ZtEditorAiHost {
         lspEnabled = prefs.getBoolean(EDITOR_PREF_LSP_ENABLED, false)
         lspTimeoutMillis = prefs.getLong(EDITOR_PREF_LSP_TIMEOUT, EditorLspManager.DEFAULT_TIMEOUT_MILLIS)
             .coerceIn(500L, 30000L)
+        isToolbarSecondaryVisible = prefs.getBoolean(EDITOR_PREF_TOOLBAR_SECONDARY_VISIBLE, false)
     }
 
     private fun applyLspSettings() {
@@ -1200,6 +1331,10 @@ class EditTextActivity : AppCompatActivity(), ZtEditorAiHost {
 
             override fun runOnUi(block: () -> Unit) {
                 runOnUiThread(block)
+            }
+
+            override fun openLspLocation(location: EditorLspLocation) {
+                navigateToLspLocation(location)
             }
         })
         lspManager.updateSettings(EditorLspManager.Settings(lspEnabled, lspTimeoutMillis))
@@ -1317,6 +1452,117 @@ class EditTextActivity : AppCompatActivity(), ZtEditorAiHost {
             }
         }
         dialog.show()
+    }
+
+    /** 当前是否为可编辑的 Java 源文件（第二栏 Java 工具显隐用）。 */
+    private fun isCurrentEditableJavaFile(): Boolean {
+        val tab = currentTab()
+        if (tab != null && (tab.previewOnly || isTextPreviewMode(tab))) return false
+        val file = currentFile ?: return false
+        return getFileExtension(file).equals("java", ignoreCase = true)
+    }
+
+    /** 非 Java 隐藏；后续同前提按钮也挂这里。 */
+    private fun updateJavaLspToolbarButtons() {
+        val show = isCurrentEditableJavaFile()
+        mEditorFormatButton?.visibility = if (show) View.VISIBLE else View.GONE
+        mEditorGotoDefButton?.visibility = if (show) View.VISIBLE else View.GONE
+        if (!show && isGotoDefinitionClickMode) {
+            setGotoDefinitionClickMode(false, notify = false)
+        } else {
+            refreshGotoDefinitionButtonUi()
+        }
+    }
+
+    /**
+     * 第二栏 Java LSP 工具共用前置：仅 Java；未安装则弹与首次进入相同的安装框；
+     * 已安装则确保 LSP 开启并执行 onReady。
+     */
+    private fun runWithJavaLspReady(onReady: () -> Unit) {
+        val file = currentFile ?: return
+        if (!isCurrentEditableJavaFile()) return
+        if (!::lspManager.isInitialized) return
+        val languageId = EditorLspManager.LANGUAGE_JAVA
+        if (!lspManager.isLanguageInstalled(languageId)) {
+            if (lspInstallPromptDialog?.isShowing == true) return
+            if (isFinishing || isDestroyed) return
+            val content = code_editor?.text?.toString().orEmpty()
+            showLspInstallPromptDialog(EditorJdtLsSupport.PACKAGE_ID, languageId, file, content)
+            return
+        }
+        if (!lspEnabled) {
+            lspEnabled = true
+            getSharedPreferences(EDITOR_PREF_NAME, Context.MODE_PRIVATE).edit()
+                .putBoolean(EDITOR_PREF_LSP_ENABLED, true)
+                .apply()
+            applyLspSettings()
+            reloadCurrentEditorLanguage()
+        }
+        onReady()
+    }
+
+    private fun onGotoDefinitionModeClicked() {
+        if (isGotoDefinitionClickMode) {
+            setGotoDefinitionClickMode(false, notify = false)
+            return
+        }
+        runWithJavaLspReady {
+            setGotoDefinitionClickMode(true, notify = true)
+        }
+    }
+
+    private fun setGotoDefinitionClickMode(enabled: Boolean, notify: Boolean) {
+        if (isGotoDefinitionClickMode == enabled) {
+            refreshGotoDefinitionButtonUi()
+            return
+        }
+        isGotoDefinitionClickMode = enabled
+        refreshGotoDefinitionButtonUi()
+        if (notify && enabled) {
+            UUtils.showMsg(getString(R.string.editor_toolbar_goto_def_on))
+        }
+    }
+
+    private fun refreshGotoDefinitionButtonUi() {
+        val button = mEditorGotoDefButton ?: return
+        if (isGotoDefinitionClickMode) {
+            button.setBackgroundResource(R.drawable.shape_editor_toolbar_button_active)
+            button.imageTintList = android.content.res.ColorStateList.valueOf(0xFF64B5F6.toInt())
+            button.alpha = 1f
+        } else {
+            button.setBackgroundResource(R.drawable.shape_editor_toolbar_button)
+            button.imageTintList = android.content.res.ColorStateList.valueOf(0xFFF4F4F4.toInt())
+            button.alpha = 1f
+        }
+    }
+
+    private fun onFormatCodeClicked() {
+        runWithJavaLspReady {
+            val file = currentFile ?: return@runWithJavaLspReady
+            flushLspDocumentChange()
+            UUtils.showMsg(getString(R.string.editor_lsp_working))
+            val tabSize = currentTabSize
+            Thread {
+                val ok = lspManager.formatDocument(
+                    file,
+                    EditorLspManager.LANGUAGE_JAVA,
+                    tabSize = tabSize,
+                    insertSpaces = true
+                )
+                runOnUiThread {
+                    UUtils.showMsg(
+                        getString(
+                            if (ok) R.string.editor_lsp_format_done
+                            else R.string.editor_lsp_format_failed
+                        )
+                    )
+                    if (ok) {
+                        flushLspDocumentChange()
+                        updateDirtyState()
+                    }
+                }
+            }.start()
+        }
     }
 
     private fun startOptionalLspInstall(
@@ -2341,16 +2587,14 @@ class EditTextActivity : AppCompatActivity(), ZtEditorAiHost {
         }
     }
 
-    private fun maybeOpenReferencesOnClick(line: Int, column: Int) {
-        if (!lspEnabled || !::lspManager.isInitialized) return
+    private fun highlightIdentifierOnClick(line: Int, column: Int) {
         val editor = code_editor ?: return
-        val file = currentFile ?: return
-        val languageId = lspLanguageId(getFileExtension(file)) ?: return
-        if (!lspManager.isLanguageInstalled(languageId)) return
-        val hit = EditorLspSymbolPopup.findIdentifierAt(editor, line, column) ?: return
-        // 关键字太短/纯数字一般不是符号引用
-        if (hit.word.length < 2 || hit.word.all { it.isDigit() }) return
-        openReferencesPopup(hit.line, hit.startColumn, hit.word)
+        val hit = EditorLspSymbolPopup.findIdentifierAt(editor, line, column)
+        if (hit == null || hit.word.length < 2 || hit.word.all { it.isDigit() }) {
+            clearLspReferenceHighlight()
+            return
+        }
+        highlightIdentifierWord(hit.word)
     }
 
     private fun clearLspReferenceHighlight() {
@@ -2456,37 +2700,190 @@ class EditTextActivity : AppCompatActivity(), ZtEditorAiHost {
     }
 
     private fun runGotoDefinition(line: Int, column: Int) {
+        if (isLspNavigationInProgress) return
         val file = currentFile ?: return
         val languageId = lspLanguageId(getFileExtension(file)) ?: return
         val editor = code_editor ?: return
-        flushLspDocumentChange()
-        UUtils.showMsg(getString(R.string.editor_lsp_working))
+        // 吸附到标识符内部，避免点在词边界/空白时 LSP 解析到别的符号
+        val hit = EditorLspSymbolPopup.findIdentifierAt(editor, line, column)
+        val queryLine = hit?.line ?: line
+        val queryColumn = if (hit != null) {
+            hit.startColumn + (hit.endColumn - hit.startColumn).coerceAtLeast(1) / 2
+        } else {
+            column
+        }
+        val snapshot = editor.text.toString()
+        val markLine = editor.cursor.leftLine
+        val markColumn = editor.cursor.leftColumn
+        val requestId = showLspNavigationLoadingDialog() ?: return
         Thread {
-            val locations = lspManager.definition(file, languageId, line, column)
-            if (locations.isEmpty()) {
-                runOnUiThread { UUtils.showMsg(getString(R.string.editor_lsp_no_definition)) }
-                return@Thread
-            }
-            // 多结果时先跳第一个；完整列表可后续再做
-            val raw = locations[0]
-            val target = lspManager.resolveNavigationLocation(file, languageId, raw)
-            runOnUiThread {
-                if (target == null || !target.file.isFile) {
-                    UUtils.showMsg(
-                        getString(
-                            if (EditorJdtClassFileSupport.needsClassFileContents(raw)) {
-                                R.string.editor_lsp_class_source_failed
-                            } else {
-                                R.string.editor_lsp_no_definition
-                            }
-                        )
-                    )
-                    return@runOnUiThread
+            try {
+                // 同步当前缓冲，避免异步 didChange 未完成导致位置错乱
+                runCatching { lspManager.changeDocument(file, languageId, snapshot) }
+                if (isLspNavRequestCancelled(requestId)) return@Thread
+                var locations = lspManager.definition(file, languageId, queryLine, queryColumn)
+                if (isLspNavRequestCancelled(requestId)) return@Thread
+                // jdt-ls 偶发未就绪：短延迟重试一次（JDK 类型 System/String 常见）
+                if (locations.isEmpty()) {
+                    try {
+                        Thread.sleep(700L)
+                    } catch (_: InterruptedException) {
+                    }
+                    if (isLspNavRequestCancelled(requestId)) return@Thread
+                    locations = lspManager.definition(file, languageId, queryLine, queryColumn)
                 }
-                pushLspNavMark(file, editor.cursor.leftLine, editor.cursor.leftColumn)
-                navigateToLspLocation(target)
+                if (isLspNavRequestCancelled(requestId)) return@Thread
+                if (locations.isEmpty()) {
+                    runOnUiThread {
+                        if (isLspNavRequestCancelled(requestId)) return@runOnUiThread
+                        dismissLspNavigationLoadingDialog()
+                        UUtils.showMsg(getString(R.string.editor_lsp_no_definition))
+                    }
+                    return@Thread
+                }
+                var resolvedTarget: EditorLspLocation? = null
+                var lastRaw: EditorLspLocation = locations[0]
+                for (raw in locations) {
+                    if (isLspNavRequestCancelled(requestId)) return@Thread
+                    lastRaw = raw
+                    val target = lspManager.resolveNavigationLocation(file, languageId, raw)
+                    if (target != null && target.file.isFile) {
+                        resolvedTarget = target
+                        break
+                    }
+                }
+                runOnUiThread {
+                    if (isLspNavRequestCancelled(requestId)) return@runOnUiThread
+                    dismissLspNavigationLoadingDialog()
+                    val target = resolvedTarget
+                    if (target == null || !target.file.isFile) {
+                        UUtils.showMsg(
+                            getString(
+                                if (EditorJdtClassFileSupport.needsClassFileContents(lastRaw)) {
+                                    R.string.editor_lsp_class_source_failed
+                                } else {
+                                    R.string.editor_lsp_no_definition
+                                }
+                            )
+                        )
+                        return@runOnUiThread
+                    }
+                    pushLspNavMark(file, markLine, markColumn)
+                    navigateToLspLocation(target)
+                }
+            } catch (_: Throwable) {
+                runOnUiThread {
+                    if (isLspNavRequestCancelled(requestId)) return@runOnUiThread
+                    dismissLspNavigationLoadingDialog()
+                    UUtils.showMsg(getString(R.string.editor_lsp_no_definition))
+                }
             }
         }.start()
+    }
+
+    private fun isLspNavRequestCancelled(requestId: Int): Boolean {
+        return requestId != lspNavRequestId || !isLspNavigationInProgress
+    }
+
+    /** @return 本次请求 id；null 表示已有导航在进行 */
+    private fun showLspNavigationLoadingDialog(): Int? {
+        if (isLspNavigationInProgress) return null
+        if (isFinishing || isDestroyed) return null
+        isLspNavigationInProgress = true
+        val requestId = ++lspNavRequestId
+        runCatching { lspNavLoadingDialog?.dismiss() }
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val pad = dp(20)
+            setPadding(pad, pad, pad, pad)
+            addView(ProgressBar(this@EditTextActivity).apply {
+                isIndeterminate = true
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                ).apply { gravity = android.view.Gravity.CENTER_HORIZONTAL }
+            })
+            addView(TextView(this@EditTextActivity).apply {
+                text = getString(R.string.editor_lsp_goto_loading)
+                setTextColor(ContextCompat.getColor(this@EditTextActivity, R.color.color_ffffff))
+                textSize = 15f
+                gravity = android.view.Gravity.CENTER
+                setPadding(0, dp(12), 0, 0)
+            })
+        }
+        val dialog = AlertDialog.Builder(this)
+            .setTitle(R.string.editor_lsp_goto_definition)
+            .setView(content)
+            .setNegativeButton(R.string.editor_lsp_goto_loading_close) { _, _ ->
+                cancelLspNavigationLoading()
+            }
+            .setCancelable(true)
+            .create()
+        dialog.setCanceledOnTouchOutside(false)
+        dialog.setOnCancelListener {
+            cancelLspNavigationLoading()
+        }
+        dialog.setOnKeyListener { d, keyCode, event ->
+            if (keyCode == android.view.KeyEvent.KEYCODE_BACK &&
+                event.action == android.view.KeyEvent.ACTION_UP
+            ) {
+                d.cancel()
+                true
+            } else {
+                false
+            }
+        }
+        lspNavLoadingDialog = dialog
+        dialog.show()
+        return requestId
+    }
+
+    private fun cancelLspNavigationLoading() {
+        // 递增 id，使后台线程结果全部作废
+        lspNavRequestId++
+        isLspNavigationInProgress = false
+        val dialog = lspNavLoadingDialog
+        lspNavLoadingDialog = null
+        runCatching {
+            if (dialog?.isShowing == true) dialog.dismiss()
+        }
+    }
+
+    private fun dismissLspNavigationLoadingDialog() {
+        isLspNavigationInProgress = false
+        val dialog = lspNavLoadingDialog
+        lspNavLoadingDialog = null
+        runCatching {
+            if (dialog?.isShowing == true) dialog.dismiss()
+        }
+    }
+
+    /**
+     * 转到定义模式：ClickEvent 在 setSelection 之前派发，必须用点击坐标吸附标识符，
+     * 并自行落光标 + intercept，避免光标停在旧位置或落在词外空白上。
+     */
+    private fun handleGotoDefinitionClick(event: ClickEvent) {
+        if (isLspNavigationInProgress) {
+            event.intercept(InterceptTarget.TARGET_EDITOR)
+            return
+        }
+        val editor = code_editor ?: return
+        val hit = EditorLspSymbolPopup.findIdentifierAt(editor, event.line, event.column)
+        val line: Int
+        val column: Int
+        if (hit != null) {
+            line = hit.line
+            column = hit.startColumn + (hit.endColumn - hit.startColumn).coerceAtLeast(1) / 2
+        } else {
+            line = event.line
+            column = event.column
+        }
+        runCatching {
+            editor.setSelection(line, column, true, SelectionChangeEvent.CAUSE_TAP)
+        }
+        // 只拦截编辑器默认落点，避免随后又 setSelection 到未吸附的触摸坐标
+        event.intercept(InterceptTarget.TARGET_EDITOR)
+        runGotoDefinition(line, column)
     }
 
     private fun runFindReferences(line: Int, column: Int) {
@@ -2945,6 +3342,7 @@ class EditTextActivity : AppCompatActivity(), ZtEditorAiHost {
     override fun onDestroy() {
         dirtyCheckHandler.removeCallbacks(dirtyCheckRunnable)
         stopLspInstallRefresh()
+        dismissLspNavigationLoadingDialog()
         editorBottomDock = null
         sidebarAnimator?.cancel()
         cancelSidebarGesture()
@@ -3014,7 +3412,7 @@ class EditTextActivity : AppCompatActivity(), ZtEditorAiHost {
 
     private fun applySidebarLeftMargin(margin: Int) {
         listOf(
-            mEditorToolbar,
+            mEditorToolbarContainer,
             mEditorTabBar,
             mEditorContentLayout,
             mEditorBottomDockView,
@@ -4267,6 +4665,9 @@ class EditTextActivity : AppCompatActivity(), ZtEditorAiHost {
         scheme.setColor(EditorColorScheme.DIAGNOSTIC_TOOLTIP_BRIEF_MSG, 0xFFE8E8E8.toInt())
         scheme.setColor(EditorColorScheme.DIAGNOSTIC_TOOLTIP_DETAILED_MSG, 0xFFB0B0B0.toInt())
         scheme.setColor(EditorColorScheme.DIAGNOSTIC_TOOLTIP_ACTION, 0xFF4DAAFC.toInt())
+        // 单击标识符高亮：介于亮黄与过暗之间的半透明蓝灰
+        scheme.setColor(EditorColorScheme.MATCHED_TEXT_BACKGROUND, 0x804A6B8A.toInt())
+        scheme.setColor(EditorColorScheme.MATCHED_TEXT_BORDER, 0x004A6FA5.toInt())
         code_editor?.getComponent(EditorAutoCompletion::class.java)?.applyColorScheme()
     }
 

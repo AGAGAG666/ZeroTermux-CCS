@@ -21,6 +21,7 @@ import com.termux.zerocore.config.mainmenu.config.CreateJavaProjectClickConfig;
 import com.termux.zerocore.config.mainmenu.config.CreateNpmProjectClickConfig;
 import com.termux.zerocore.config.mainmenu.config.CreatePhpProjectClickConfig;
 import com.termux.zerocore.config.mainmenu.config.CreatePythonProjectClickConfig;
+import com.termux.zerocore.config.mainmenu.config.CreateVscodeClickConfig;
 import com.termux.zerocore.config.mainmenu.config.OpenProjectClickConfig;
 import com.termux.zerocore.config.mainmenu.config.DataMessageClickConfig;
 import com.termux.zerocore.config.mainmenu.config.DefBashClickConfig;
@@ -104,6 +105,7 @@ public class MainMenuConfig implements BaseConfig {
         createProjectClicks.add(new CreatePythonProjectClickConfig());
         createProjectClicks.add(new CreatePhpProjectClickConfig());
         createProjectClicks.add(new CreateNpmProjectClickConfig());
+        createProjectClicks.add(new CreateVscodeClickConfig());
         createProjectClicks.add(new OpenProjectClickConfig());
         MAIN_MENU_CATEGORY_DATAS.add(new MainMenuCategoryData(context.getString(R.string.menu_create_project), CODE_CREATE_PROJECT, createProjectClicks));
 

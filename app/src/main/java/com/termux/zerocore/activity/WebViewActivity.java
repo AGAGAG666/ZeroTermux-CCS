@@ -43,18 +43,18 @@ public class WebViewActivity extends BaseThemeActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_web_view);
         StatusBarCompat.cancelLightStatusBar(this);
-        setImgLiftAs();
-        String title = getIntent().getStringExtra("title");
-        if(title!= null) {
-            setBaseTitleString(title);
-        }
-        getRightTv().setVisibility(View.GONE);
-
         String title_visible = getIntent().getStringExtra("title_visible");
-
-        if(title_visible != null){
-            getBaseTitle().setVisibility(View.GONE);
-        }else{
+        boolean hideTitleBar = title_visible != null;
+        if (hideTitleBar) {
+            // 隐藏整栏标题（含返回），增大 WebView 可视区域
+            setGoneTitle();
+        } else {
+            setImgLiftAs();
+            String title = getIntent().getStringExtra("title");
+            if (title != null) {
+                setBaseTitleString(title);
+            }
+            getRightTv().setVisibility(View.GONE);
             getBaseTitle().setVisibility(View.VISIBLE);
         }
         setting();

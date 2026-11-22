@@ -126,7 +126,7 @@ android {
         // versionCode 118
         // versionName "0.118.0"
         versionCode 118
-        versionName "0.118.3.63"
+        versionName "0.118.3.64"
         // @}
         if (appVersionName) versionName = appVersionName
         validateVersionName(versionName)
@@ -415,19 +415,19 @@ clean {
 // 产物由 AGAGAG666/cc-switch 的 Android CI 交叉编译产生，按 tag + SHA-256 钉死。
 // 原生可执行和 Web 包不入库，构建时准备到 app/ccs-artifacts/ 并校验。
 // Release pins also support verified same-commit CI inputs before publication.
-ext.ccsArtifactTag = "ccs-android-a865499d"
+ext.ccsArtifactTag = "ccs-ci-c33fb6e4"
 ext.ccsArtifacts = [
     [
         name    : "libccsidecar.so",
         dest    : "ccs-artifacts/jniLibs/arm64-v8a/libccsidecar.so",
-        sha256  : "b766b70bc14d807af3c7bbe55b1b49792a1e81b68c6cb11c5dca6463392dc557",
-        size    : 21670848L
+        sha256  : "df3f3cbae96584ae77f9387875a2f2c73d84bb5dca264eb9bbccf55916743ff6",
+        size    : 25813984L
     ],
     [
         name    : "ccs-web.zip",
         dest    : "ccs-artifacts/assets/ccs-web.zip",
-        sha256  : "416d44b9a713b2a1112d0cbab30f3e535266d27211dbf3f17c405fb646c6879a",
-        size    : 2506944L
+        sha256  : "d4192fb6c6525eb5050d1372f950ec53aee586cb3391082fa52f213424148459",
+        size    : 3314039L
     ]
 ]
 
@@ -543,11 +543,11 @@ task downloadBootstraps() {
         }
     }*/
     doLast {
-        def version = "2026.06.28-r1+apt.android-7"
-        downloadBootstrap("aarch64", "4fa66c681eefb16b71d2fa5118609f5bb5ce449fc815edee2762e22b1a9b7a26", version)
-        downloadBootstrap("arm", "ed2c65a5de88f536c4f59bad3682a112cf4293430b07ce6f2009bf26005f7aaa", version)
-        downloadBootstrap("i686", "f29ded5b47eff6519b5427f78b9599407ca0a1c51fb295df5352d671126f4c81", version)
-        downloadBootstrap("x86_64", "f73fd8ea465b5065d94e5af27bce893f3968d3ec901f02f42ef3b71e4a231e2c", version)
+        def version = "2026.08.02-r1+apt.android-7"
+        downloadBootstrap("aarch64", "90a352db1c79aa5b6773003553d52c71da68cbe3eca2d277d0c5683d5163e658", version)
+        downloadBootstrap("arm", "f6bc4a8583166bcb38e0e74d42d6e56fd2f7401a039aa7344f0cd03701dea0bd", version)
+        downloadBootstrap("i686", "f571d8899253ee6893d349921dcef98a618c50dc0a6b503ca5994c88a23b7f44", version)
+        downloadBootstrap("x86_64", "c2d9892ff6284ada4943c0234296008098d70a73df3a419987ddd03e58af0424", version)
     }
     // @}
 }

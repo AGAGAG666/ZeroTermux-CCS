@@ -11,7 +11,7 @@ import zipfile
 from pathlib import Path
 
 from prepare_ccs_test_assets import (
-    BRANCH, REPOSITORY, WORKFLOWS, prepare, validate_gradle, validate_pair,
+    BRANCH, REPOSITORY, TEST_BRANCH, WORKFLOWS, prepare, validate_gradle, validate_pair,
 )
 
 
@@ -191,7 +191,7 @@ class AssetPreparationTests(unittest.TestCase):
                         self.prepare(gradle)
                     self.assertFalse(self.output.exists())
 
-    def run_cli(self, *arguments):
+    def run_cli(self, *arguments, ref_name="feature/ccs-full-port", ref_type="branch"):
         web_json = self.root / "web-run.json"
         native_json = self.root / "sidecar-run.json"
         web_json.write_text(json.dumps(self.web))
@@ -200,7 +200,35 @@ class AssetPreparationTests(unittest.TestCase):
             sys.executable, str(Path(__file__).with_name("prepare_ccs_test_assets.py").resolve()),
             "--web-run-json", str(web_json), "--sidecar-run-json", str(native_json),
             "--source-sha", self.sha, *map(str, arguments),
-        ], capture_output=True, text=True, timeout=10)
+        ], capture_output=True, text=True, timeout=10,
+           env={**os.environ, "GITHUB_REF_NAME": ref_name, "GITHUB_REF_TYPE": ref_type})
+
+    def test_cli_test_branch_requires_matching_host_branch_and_manual_runs(self):
+        self.web["head_branch"] = self.native["head_branch"] = TEST_BRANCH
+        accepted = self.run_cli("--validate-only", ref_name=TEST_BRANCH)
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+        for ref_name, ref_type in (("feature/ccs-full-port", "branch"),
+                                   (TEST_BRANCH, "tag"), ("test/ccs-other", "branch")):
+            with self.subTest(ref_name=ref_name, ref_type=ref_type):
+                rejected = self.run_cli("--validate-only", ref_name=ref_name, ref_type=ref_type)
+                self.assertNotEqual(rejected.returncode, 0)
+                self.assertIn("unexpected branch or event", rejected.stderr)
+        for run in (self.web, self.native):
+            run["event"] = "push"
+            rejected = self.run_cli("--validate-only", ref_name=TEST_BRANCH)
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("unexpected branch or event", rejected.stderr)
+            run["event"] = "workflow_dispatch"
+        self.native["head_branch"] = BRANCH
+        self.assertNotEqual(self.run_cli("--validate-only", ref_name=TEST_BRANCH).returncode, 0)
+
+    def test_test_branch_records_actual_source_in_manifest(self):
+        self.web["head_branch"] = self.native["head_branch"] = TEST_BRANCH
+        gradle = self.write_gradle("ccs-ci-" + self.sha[:8])
+        manifest = prepare(self.zip, self.bin, self.web, self.native, self.sha, self.output,
+                           gradle, host_branch=TEST_BRANCH)
+        self.assertEqual(manifest["sourceBranch"], TEST_BRANCH)
+        self.assertEqual(manifest["artifacts"], self.artifacts())
 
     def test_cli_accepts_both_tags_with_full_nonuniform_sha(self):
         self.sha = "0123456789abcdef" * 2 + "12345678"

@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import os
 import re
 import struct
 import sys
@@ -10,6 +11,7 @@ from pathlib import Path
 
 REPOSITORY = "AGAGAG666/cc-switch"
 BRANCH = "android-sidecar"
+TEST_BRANCH = "test/ccs-v4.0.38"
 TRUSTED_EVENTS = ("push", "workflow_dispatch")
 WORKFLOWS = {
     "web": ".github/workflows/android-frontend-build.yml",
@@ -17,13 +19,15 @@ WORKFLOWS = {
 }
 
 
-def validate_pair(web, sidecar, source_sha):
+def validate_pair(web, sidecar, source_sha, *, host_branch=None):
+    source_branch = TEST_BRANCH if host_branch == TEST_BRANCH else BRANCH
+    events = ("workflow_dispatch",) if source_branch == TEST_BRANCH else TRUSTED_EVENTS
     if not re.fullmatch(r"[0-9a-f]{40}", source_sha):
         raise ValueError("source SHA must be a full lowercase Git commit hash")
     for kind, run in (("web", web), ("sidecar", sidecar)):
         if run.get("repository", {}).get("full_name") != REPOSITORY:
             raise ValueError(f"{kind}: unexpected source repository")
-        if run.get("head_branch") != BRANCH or run.get("event") not in TRUSTED_EVENTS:
+        if run.get("head_branch") != source_branch or run.get("event") not in events:
             raise ValueError(f"{kind}: unexpected branch or event")
         if run.get("path", "").split("@", 1)[0] != WORKFLOWS[kind]:
             raise ValueError(f"{kind}: unexpected source workflow")
@@ -33,6 +37,7 @@ def validate_pair(web, sidecar, source_sha):
             raise ValueError(f"{kind}: source commit mismatch")
         if not isinstance(run.get("id"), int) or run["id"] <= 0:
             raise ValueError(f"{kind}: invalid run ID")
+    return source_branch
 
 
 def validate_web(path):
@@ -102,8 +107,8 @@ def validate_gradle(path, source_sha, artifacts):
             raise ValueError(f"Gradle size/hash mismatch for {name}")
 
 
-def prepare(web_zip, sidecar, web, sidecar_run, source_sha, output, gradle=None):
-    validate_pair(web, sidecar_run, source_sha)
+def prepare(web_zip, sidecar, web, sidecar_run, source_sha, output, gradle=None, *, host_branch=None):
+    source_branch = validate_pair(web, sidecar_run, source_sha, host_branch=host_branch)
     if web_zip.is_symlink() or sidecar.is_symlink() or output.is_symlink():
         raise ValueError("asset paths must not be symlinks")
     validate_web(web_zip)
@@ -117,7 +122,7 @@ def prepare(web_zip, sidecar, web, sidecar_run, source_sha, output, gradle=None)
     for name in (*data, "manifest.json"):
         if (output / name).exists():
             raise ValueError("refusing to overwrite existing prepared assets")
-    manifest = {"sourceRepository": REPOSITORY, "sourceBranch": BRANCH, "sourceSha": source_sha,
+    manifest = {"sourceRepository": REPOSITORY, "sourceBranch": source_branch, "sourceSha": source_sha,
                 "webRunId": web["id"], "sidecarRunId": sidecar_run["id"], "artifacts": artifacts}
     for name, content in data.items():
         with (output / name).open("xb") as stream:
@@ -139,13 +144,15 @@ def main():
     args = parser.parse_args()
     web = json.loads(args.web_run_json.read_text())
     sidecar = json.loads(args.sidecar_run_json.read_text())
+    host_branch = os.environ.get("GITHUB_REF_NAME") if os.environ.get("GITHUB_REF_TYPE") == "branch" else None
     if args.validate_only:
-        validate_pair(web, sidecar, args.source_sha)
+        validate_pair(web, sidecar, args.source_sha, host_branch=host_branch)
         print("CCS source runs verified")
         return
     if not all((args.web_zip, args.sidecar, args.output_dir)):
         parser.error("preparation requires --web-zip, --sidecar and --output-dir")
-    result = prepare(args.web_zip, args.sidecar, web, sidecar, args.source_sha, args.output_dir, args.gradle)
+    result = prepare(args.web_zip, args.sidecar, web, sidecar, args.source_sha, args.output_dir, args.gradle,
+                     host_branch=host_branch)
     print(json.dumps(result, indent=2))
 
 
