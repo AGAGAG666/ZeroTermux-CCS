@@ -1,5 +1,0 @@
-<resources>
-    <string name="terminal_file_link_chooser">Open file location · %1$s</string>
-    <string name="terminal_file_link_unavailable">This file or folder is unavailable</string>
-    <string name="terminal_file_manager_missing">No file manager can open this folder</string>
-</resources>

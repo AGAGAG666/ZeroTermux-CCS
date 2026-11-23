@@ -59,9 +59,6 @@ public final class TerminalView extends View {
     public TerminalViewClient mClient;
 
     private TextSelectionCursorController mTextSelectionCursorController;
-    private String mPressedFileLink;
-    private long mFileLinkDownTime;
-    private TerminalSession mFileLinkSession;
 
     private Handler mTerminalCursorBlinkerHandler;
     private TerminalCursorBlinkerRunnable mTerminalCursorBlinkerRunnable;
@@ -149,10 +146,8 @@ public final class TerminalView extends View {
                 if (mEmulator != null && mEmulator.isMouseTrackingActive() && !event.isFromSource(InputDevice.SOURCE_MOUSE) && !isSelectingText() && !scrolledWithFinger) {
                     // Quick event processing when mouse tracking is active - do not wait for check of double tapping
                     // for zooming.
-                    if (mPressedFileLink == null) {
-                        sendMouseEventCode(event, TerminalEmulator.MOUSE_LEFT_BUTTON, true);
-                        sendMouseEventCode(event, TerminalEmulator.MOUSE_LEFT_BUTTON, false);
-                    }
+                    sendMouseEventCode(event, TerminalEmulator.MOUSE_LEFT_BUTTON, true);
+                    sendMouseEventCode(event, TerminalEmulator.MOUSE_LEFT_BUTTON, false);
                     return true;
                 }
                 scrolledWithFinger = false;
@@ -565,18 +560,6 @@ public final class TerminalView extends View {
         return new int[] { column, row };
     }
 
-    private String fileLinkAt(MotionEvent event) {
-        int[] cell = getColumnAndRow(event, true);
-        String destination = mEmulator.getScreen().getLocalFileLinkAt(cell[0], cell[1]);
-        return destination != null ? destination : mEmulator.getScreen().getUnderlinedAbsolutePathAt(cell[0], cell[1]);
-    }
-
-    public String getTappedFileLink(MotionEvent event) {
-        if (mEmulator == null || mPressedFileLink == null || mFileLinkSession != mTermSession
-            || event.getDownTime() != mFileLinkDownTime) return null;
-        return mPressedFileLink.equals(fileLinkAt(event)) ? mPressedFileLink : null;
-    }
-
     /** Send a single mouse event code to the terminal. */
     void sendMouseEventCode(MotionEvent e, int button, boolean pressed) {
         int[] columnAndRow = getColumnAndRow(e, false);
@@ -658,14 +641,6 @@ public final class TerminalView extends View {
 
         if (mEmulator == null) return true;
         final int action = event.getAction();
-        if (action == MotionEvent.ACTION_DOWN) {
-            mPressedFileLink = !isSelectingText() && mClient.supportsLocalFileLinks() ? fileLinkAt(event) : null;
-            mFileLinkDownTime = event.getDownTime();
-            mFileLinkSession = mPressedFileLink == null ? null : mTermSession;
-        } else if (action == MotionEvent.ACTION_CANCEL || action == MotionEvent.ACTION_POINTER_DOWN) {
-            mPressedFileLink = null;
-            mFileLinkSession = null;
-        }
 
         if (isSelectingText()) {
             updateFloatingToolbarVisibility(event);
@@ -685,7 +660,7 @@ public final class TerminalView extends View {
                         if (!TextUtils.isEmpty(text)) mEmulator.paste(text.toString());
                     }
                 }
-            } else if (mEmulator.isMouseTrackingActive() && mPressedFileLink == null) { // BUTTON_PRIMARY.
+            } else if (mEmulator.isMouseTrackingActive()) { // BUTTON_PRIMARY.
                 switch (event.getAction()) {
                     case MotionEvent.ACTION_DOWN:
                     case MotionEvent.ACTION_UP:

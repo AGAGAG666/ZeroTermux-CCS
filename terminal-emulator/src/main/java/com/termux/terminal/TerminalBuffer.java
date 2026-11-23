@@ -284,36 +284,27 @@ public final class TerminalBuffer {
                 }
 
                 int lastNonSpaceIndex = 0;
-                if (oldLine.mLineWrap) {
-                    // Wrapped rows retain their trailing cells for reflow.
+                boolean justToCursor = false;
+                if (cursorAtThisRow || oldLine.mLineWrap) {
+                    // Take the whole line, either because of cursor on it, or if line wrapping.
                     lastNonSpaceIndex = oldLine.getSpaceUsed();
+                    if (cursorAtThisRow) justToCursor = true;
                 } else {
-                    int col = 0;
-                    for (int i = 0; i < oldLine.getSpaceUsed();) {
-                        int cp = Character.codePointAt(oldLine.mText, i, oldLine.getSpaceUsed());
-                        int width = WcWidth.width(cp);
-                        int end = i + Character.charCount(cp);
-                        if (cp != ' ' || (width > 0 && (oldLine.getHyperlink(col) != null ||
-                            (cursorAtThisRow && col <= oldCursorColumn && oldCursorColumn < col + width))))
-                            lastNonSpaceIndex = end;
-                        if (width > 0) col += width;
-                        i = end;
-                    }
+                    for (int i = 0; i < oldLine.getSpaceUsed(); i++)
+                        // NEWLY INTRODUCED BUG! Should not index oldLine.mStyle with char indices
+                        if (oldLine.mText[i] != ' '/* || oldLine.mStyle[i] != currentStyle */)
+                            lastNonSpaceIndex = i + 1;
                 }
 
                 int currentOldCol = 0;
                 long styleAtCol = 0;
-                String linkAtCol = null;
                 for (int i = 0; i < lastNonSpaceIndex; i++) {
                     // Note that looping over java character, not cells.
                     char c = oldLine.mText[i];
                     int codePoint = (Character.isHighSurrogate(c)) ? Character.toCodePoint(c, oldLine.mText[++i]) : c;
                     int displayWidth = WcWidth.width(codePoint);
                     // Use the last style if this is a zero-width character:
-                    if (displayWidth > 0) {
-                        styleAtCol = oldLine.getStyle(currentOldCol);
-                        linkAtCol = oldLine.getHyperlink(currentOldCol);
-                    }
+                    if (displayWidth > 0) styleAtCol = oldLine.getStyle(currentOldCol);
 
                     // Line wrap as necessary:
                     if (currentOutputExternalColumn + displayWidth > mColumns) {
@@ -329,17 +320,17 @@ public final class TerminalBuffer {
 
                     int offsetDueToCombiningChar = ((displayWidth <= 0 && currentOutputExternalColumn > 0) ? 1 : 0);
                     int outputColumn = currentOutputExternalColumn - offsetDueToCombiningChar;
-                    setChar(outputColumn, currentOutputExternalRow, codePoint, styleAtCol, linkAtCol);
+                    setChar(outputColumn, currentOutputExternalRow, codePoint, styleAtCol);
 
                     if (displayWidth > 0) {
-                        if (oldCursorRow == externalOldRow && oldCursorColumn >= currentOldCol &&
-                            oldCursorColumn < currentOldCol + displayWidth) {
-                            newCursorColumn = currentOutputExternalColumn + oldCursorColumn - currentOldCol;
+                        if (oldCursorRow == externalOldRow && oldCursorColumn == currentOldCol) {
+                            newCursorColumn = currentOutputExternalColumn;
                             newCursorRow = currentOutputExternalRow;
                             newCursorPlaced = true;
                         }
                         currentOldCol += displayWidth;
                         currentOutputExternalColumn += displayWidth;
+                        if (justToCursor && newCursorPlaced) break;
                     }
                 }
                 // Old row has been copied. Check if we need to insert newline if old line was not wrapping:
@@ -458,55 +449,10 @@ public final class TerminalBuffer {
     }
 
     public void setChar(int column, int row, int codePoint, long style) {
-        setChar(column, row, codePoint, style, null);
-    }
-
-    void setChar(int column, int row, int codePoint, long style, String hyperlink) {
         if (row  < 0 || row >= mScreenRows || column < 0 || column >= mColumns)
             throw new IllegalArgumentException("TerminalBuffer.setChar(): row=" + row + ", column=" + column + ", mScreenRows=" + mScreenRows + ", mColumns=" + mColumns);
         row = externalToInternalRow(row);
-        allocateFullLineIfNecessary(row).setChar(column, codePoint, style, hyperlink);
-    }
-
-    /** Returns the decoded absolute local path at a display cell, or null. Column is zero-based;
-     * row 0 is the first visible row, and history rows are negative down to
-     * -getActiveTranscriptRows(). Invalid coordinates return null. */
-    public String getLocalFileLinkAt(int column, int row) {
-        if (column < 0 || column >= mColumns || row < -mActiveTranscriptRows || row >= mScreenRows) return null;
-        TerminalRow line = mLines[externalToInternalRow(row)];
-        return line == null ? null : line.getHyperlink(column);
-    }
-
-    /** Some TUIs underline the path itself without sending an OSC 8 destination. */
-    public String getUnderlinedAbsolutePathAt(int column, int row) {
-        if (column < 0 || column >= mColumns || row < -mActiveTranscriptRows || row >= mScreenRows
-            || !isUnderlined(column, row)) return null;
-        int left = column, top = row, right = column, bottom = row;
-        int length = 1;
-        while (left > 0 || (top > -mActiveTranscriptRows && getLineWrap(top - 1))) {
-            int x = left == 0 ? mColumns - 1 : left - 1;
-            int y = left == 0 ? top - 1 : top;
-            if (!isUnderlined(x, y)) break;
-            if (++length > 4096) return null;
-            left = x;
-            top = y;
-        }
-        while (right + 1 < mColumns || (bottom + 1 < mScreenRows && getLineWrap(bottom))) {
-            int x = right + 1 == mColumns ? 0 : right + 1;
-            int y = right + 1 == mColumns ? bottom + 1 : bottom;
-            if (!isUnderlined(x, y)) break;
-            if (++length > 4096) return null;
-            right = x;
-            bottom = y;
-        }
-        String text = getSelectedText(left, top, right, bottom);
-        return text.startsWith("/") && !text.startsWith("//") ? text : null;
-    }
-
-    private boolean isUnderlined(int column, int row) {
-        TerminalRow line = mLines[externalToInternalRow(row)];
-        return line != null && (TextStyle.decodeEffect(line.getStyle(column))
-            & TextStyle.CHARACTER_ATTRIBUTE_UNDERLINE) != 0;
+        allocateFullLineIfNecessary(row).setChar(column, codePoint, style);
     }
 
     public long getStyleAt(int externalRow, int column) {

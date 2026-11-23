@@ -5,6 +5,7 @@ import android.database.Cursor;
 import android.database.MatrixCursor;
 import android.graphics.Point;
 import android.os.CancellationSignal;
+import android.net.Uri;
 import android.os.ParcelFileDescriptor;
 import android.provider.DocumentsContract.Document;
 import android.provider.DocumentsContract.Root;
@@ -223,8 +224,8 @@ public class TermuxDocumentsProvider extends DocumentsProvider {
      */
     private static File getFileForDocId(String docId) throws FileNotFoundException {
         if (docId == null || docId.isEmpty()) throw new FileNotFoundException("Empty document id");
-        // DocumentsContract already decoded the URI path segment. A literal "%2F" is a file name.
-        final File f = new File(docId).getAbsoluteFile();
+        String decoded = Uri.decode(docId);
+        final File f = new File(decoded).getAbsoluteFile();
         final String base;
         final String path;
         try {

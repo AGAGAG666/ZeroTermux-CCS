@@ -130,6 +130,14 @@ public final class TerminalReferencePicker {
                 && (fd.getDeclaredLength() < 0 || fd.getDeclaredLength() == direct.length()))
                 return check(direct);
             if (homeProvider) throw new IOException();
+            if (info != null && info.applicationInfo != null && fd.getStartOffset() == 0) {
+                int systemFlags = android.content.pm.ApplicationInfo.FLAG_SYSTEM
+                    | android.content.pm.ApplicationInfo.FLAG_UPDATED_SYSTEM_APP;
+                File original = SharedReferencePath.find(shared, (info.applicationInfo.flags & systemFlags) != 0,
+                    info.packageName, authority, uri.getPathSegments());
+                if (original != null && (fd.getDeclaredLength() < 0 || fd.getDeclaredLength() == original.length()))
+                    return check(original);
+            }
             String name = null;
             try (Cursor c = resolver.query(uri, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
                 if (c != null && c.moveToFirst()) name = c.getString(0);
