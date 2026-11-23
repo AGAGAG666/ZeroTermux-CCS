@@ -415,7 +415,7 @@ clean {
 // 产物由 AGAGAG666/cc-switch 的 Android CI 交叉编译产生，按 tag + SHA-256 钉死。
 // 原生可执行和 Web 包不入库，构建时准备到 app/ccs-artifacts/ 并校验。
 // Release pins also support verified same-commit CI inputs before publication.
-ext.ccsArtifactTag = "ccs-ci-c33fb6e4"
+ext.ccsArtifactTag = "ccs-ci-219a55e2"
 ext.ccsArtifacts = [
     [
         name    : "libccsidecar.so",
@@ -426,8 +426,8 @@ ext.ccsArtifacts = [
     [
         name    : "ccs-web.zip",
         dest    : "ccs-artifacts/assets/ccs-web.zip",
-        sha256  : "d4192fb6c6525eb5050d1372f950ec53aee586cb3391082fa52f213424148459",
-        size    : 3314039L
+        sha256  : "73b203b80f33752ac3c6002fe7be0e107c42ec6141a4599d343f6d39a21e1c8e",
+        size    : 3315335L
     ]
 ]
 
