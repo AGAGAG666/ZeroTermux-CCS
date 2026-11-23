@@ -2072,4 +2072,13 @@ cd ~ &amp;&amp; pkg update -y \n
     <string name="ccs_import_export">Import / export</string>
     <string name="ccs_settings">Settings</string>
 
+    <string name="terminal_reference_add_file">Add file</string>
+    <string name="terminal_reference_add_image">Add image</string>
+    <string name="terminal_reference_parent">../  Parent directory</string>
+    <string name="terminal_reference_invalid">Cannot use this path. Choose a readable file without control characters.</string>
+    <string name="terminal_reference_location">Choose location</string>
+    <string name="terminal_reference_home">Home</string>
+    <string name="terminal_reference_shared">Shared storage</string>
+    <string name="terminal_reference_unreadable">This location is not readable.</string>
+    <string name="terminal_reference_screenshots">Screenshots (DCIM/Screenshots)</string>
 </resources>

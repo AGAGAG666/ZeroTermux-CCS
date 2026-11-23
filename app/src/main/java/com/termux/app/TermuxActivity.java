@@ -459,6 +459,7 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
 
     @Override
     protected void onStop() {
+        cancelTerminalReferencePicker();
         super.onStop();
 
         Logger.logDebug(LOG_TAG, "onStop");
@@ -2951,7 +2952,36 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
             .addConsumer(mSlidingConsumer).enableVertical();
     }
 
+    private com.termux.app.reference.TerminalReferencePicker mTerminalReferencePicker;
+    private int mTerminalReferenceGeneration;
+
+    public void cancelTerminalReferencePicker() {
+        mTerminalReferenceGeneration++;
+        if (mTerminalReferencePicker != null) {
+            mTerminalReferencePicker.cancel();
+            mTerminalReferencePicker = null;
+        }
+    }
+
+    private void pickTerminalReference(boolean imagesOnly) {
+        cancelTerminalReferencePicker();
+        final TerminalSession session = getCurrentSession();
+        if (session == null || !session.isRunning() || session.getEmulator() == null) return;
+        final int generation = mTerminalReferenceGeneration;
+        mTerminalReferencePicker = new com.termux.app.reference.TerminalReferencePicker(this, imagesOnly, file -> {
+            if (generation != mTerminalReferenceGeneration || isFinishing() || isDestroyed()
+                || getCurrentSession() != session || !session.isRunning() || session.getEmulator() == null
+                || !com.termux.app.reference.TerminalReferencePath.isReadableFile(file)) return;
+            mTerminalReferencePicker = null;
+            session.getEmulator().paste(com.termux.app.reference.TerminalReferencePath.format(file.getAbsolutePath()));
+            getDrawer().smoothClose();
+        });
+        mTerminalReferencePicker.show();
+    }
+
     private void initListener() {
+        findViewById(R.id.terminal_add_file).setOnClickListener(v -> pickTerminalReference(false));
+        findViewById(R.id.terminal_add_image).setOnClickListener(v -> pickTerminalReference(true));
         mTerminalView.getTextSelectionCursorControllerView().setAddCommend(edit -> {
             if (!TextUtils.isEmpty(edit)) {
                 UUtils.showMsg(UUtils.getString(R.string.add_commend_msg_ok));
