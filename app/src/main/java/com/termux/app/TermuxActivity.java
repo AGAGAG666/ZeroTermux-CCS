@@ -459,7 +459,6 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
 
     @Override
     protected void onStop() {
-        cancelTerminalReferencePicker();
         super.onStop();
 
         Logger.logDebug(LOG_TAG, "onStop");
@@ -485,6 +484,7 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
 
     @Override
     public void onDestroy() {
+        cancelTerminalReferencePicker();
         super.onDestroy();
 
         Logger.logDebug(LOG_TAG, "onDestroy");
@@ -1017,6 +1017,10 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
     @Override
     protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == com.termux.app.reference.TerminalReferencePicker.REQUEST) {
+            if (mTerminalReferencePicker != null) mTerminalReferencePicker.onResult(resultCode, data);
+            return;
+        }
         Logger.logVerbose(LOG_TAG, "onActivityResult: requestCode: " + requestCode + ", resultCode: "  + resultCode + ", data: "  + IntentUtils.getIntentString(data));
         if (requestCode == PermissionUtils.REQUEST_GRANT_STORAGE_PERMISSION) {
             requestStoragePermission(true);
@@ -2964,15 +2968,15 @@ public final class TermuxActivity extends AppCompatActivity implements ServiceCo
     }
 
     private void pickTerminalReference(boolean imagesOnly) {
-        cancelTerminalReferencePicker();
+        if (mTerminalReferencePicker != null) return;
         final TerminalSession session = getCurrentSession();
         if (session == null || !session.isRunning() || session.getEmulator() == null) return;
         final int generation = mTerminalReferenceGeneration;
         mTerminalReferencePicker = new com.termux.app.reference.TerminalReferencePicker(this, imagesOnly, file -> {
-            if (generation != mTerminalReferenceGeneration || isFinishing() || isDestroyed()
-                || getCurrentSession() != session || !session.isRunning() || session.getEmulator() == null
-                || !com.termux.app.reference.TerminalReferencePath.isReadableFile(file)) return;
+            if (generation != mTerminalReferenceGeneration) return;
             mTerminalReferencePicker = null;
+            if (isFinishing() || isDestroyed() || getCurrentSession() != session || !session.isRunning() || session.getEmulator() == null
+                || !com.termux.app.reference.TerminalReferencePath.isReadableFile(file)) return;
             session.getEmulator().paste(com.termux.app.reference.TerminalReferencePath.format(file.getAbsolutePath()));
             getDrawer().smoothClose();
         });

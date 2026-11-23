@@ -187,6 +187,8 @@ public final class TerminalEmulator {
 
     /** Holds OSC and device control arguments, which can be strings. */
     private final StringBuilder mOSCOrDeviceControlArgs = new StringBuilder();
+    private boolean mInvalidOsc;
+    private String mCurrentHyperlink;
 
     /**
      * True if the current escape sequence should continue, false if the current escape sequence should be terminated.
@@ -577,6 +579,16 @@ public final class TerminalEmulator {
             return;
         }
 
+        if (mEscapeState == ESC_OSC_ESC && b != '\\') {
+            mInvalidOsc = true;
+            if (b == 7) doOscSetTextParameters("\007");
+            else if (b != 27) continueSequence(ESC_OSC);
+            return;
+        }
+        if (mEscapeState == ESC_OSC && (b < 32 || (b >= 127 && b <= 159)) && b != 7 && b != 27) {
+            mInvalidOsc = true;
+            return;
+        }
         switch (b) {
             case 0: // Null character (NUL, ^@). Do nothing.
                 break;
@@ -1253,6 +1265,7 @@ public final class TerminalEmulator {
                 // Reset: Use Normal Screen Buffer and restore cursor as in DECRC.
                 TerminalBuffer newScreen = setting ? mAltBuffer : mMainBuffer;
                 if (newScreen != mScreen) {
+                    mCurrentHyperlink = null;
                     boolean resized = !(newScreen.mColumns == mColumns && newScreen.mScreenRows == mRows);
                     if (setting) saveCursor();
                     mScreen = newScreen;
@@ -1482,6 +1495,7 @@ public final class TerminalEmulator {
                 setDecsetinternalBit(DECSET_BIT_APPLICATION_KEYPAD, true);
                 break;
             case ']': // OSC
+                mInvalidOsc = false;
                 mOSCOrDeviceControlArgs.setLength(0);
                 continueSequence(ESC_OSC);
                 break;
@@ -2012,6 +2026,11 @@ public final class TerminalEmulator {
 
     /** An Operating System Controls (OSC) Set Text Parameters. May come here from BEL or ST. */
     private void doOscSetTextParameters(String bellOrStringTerminator) {
+        if (mInvalidOsc) {
+            mCurrentHyperlink = null;
+            finishSequence();
+            return;
+        }
         int value = -1;
         String textParameter = "";
         // Extract initial $value from initial "$value;..." string.
@@ -2029,6 +2048,10 @@ public final class TerminalEmulator {
         }
 
         switch (value) {
+            case 8:
+                int separator = textParameter.indexOf(';');
+                mCurrentHyperlink = separator < 0 ? null : localHyperlink(textParameter.substring(separator + 1));
+                break;
             case 0: // Change icon name and window title to T.
             case 1: // Change icon name to T.
             case 2: // Change window title to T.
@@ -2282,12 +2305,54 @@ public final class TerminalEmulator {
         return result;
     }
 
+    private static String localHyperlink(String target) {
+        if (target.isEmpty() || target.length() > 4096) return null;
+        for (int i = 0; i < target.length(); i++) {
+            char c = target.charAt(i);
+            if (Character.isISOControl(c) || c == '\\') return null;
+        }
+        if (target.startsWith("/") && !target.startsWith("//")) return target;
+        try {
+            java.net.URI uri = new java.net.URI(target);
+            if (!"file".equalsIgnoreCase(uri.getScheme()) || uri.isOpaque() || uri.getRawAuthority() != null ||
+                uri.getRawPath() == null || !uri.getRawPath().startsWith("/") ||
+                uri.getRawQuery() != null || uri.getRawFragment() != null) return null;
+            String raw = uri.getRawPath();
+            StringBuilder decoded = new StringBuilder();
+            for (int i = 0; i < raw.length();) {
+                if (raw.charAt(i) != '%') {
+                    decoded.append(raw.charAt(i++));
+                    continue;
+                }
+                java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+                while (i < raw.length() && raw.charAt(i) == '%') {
+                    bytes.write(Integer.parseInt(raw.substring(i + 1, i + 3), 16));
+                    i += 3;
+                }
+                decoded.append(java.nio.charset.StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                    .decode(java.nio.ByteBuffer.wrap(bytes.toByteArray())));
+            }
+            String path = decoded.toString();
+            if (!path.startsWith("/") || path.startsWith("//")) return null;
+            for (int i = 0; i < path.length(); i++)
+                if (Character.isISOControl(path.charAt(i)) || path.charAt(i) == '\\') return null;
+            return path;
+        } catch (java.net.URISyntaxException | java.nio.charset.CharacterCodingException | IllegalArgumentException e) {
+            return null;
+        }
+    }
+
     private void collectOSCArgs(int b) {
-        if (mOSCOrDeviceControlArgs.length() < MAX_OSC_STRING_LENGTH) {
+        if (mInvalidOsc) {
+            continueSequence(mEscapeState);
+        } else if (mOSCOrDeviceControlArgs.length() + Character.charCount(b) <= MAX_OSC_STRING_LENGTH) {
             mOSCOrDeviceControlArgs.appendCodePoint(b);
             continueSequence(mEscapeState);
         } else {
-            unknownSequence(b);
+            mInvalidOsc = true;
+            continueSequence(mEscapeState);
         }
     }
 
@@ -2487,7 +2552,7 @@ public final class TerminalEmulator {
         // so was mCursorCol changed after the offsetDueToCombiningChar conditional by another thread?
         // TODO: Check if there are thread synchronization issues with mCursorCol and mCursorRow, possibly causing others bugs too.
         if (column < 0) column = 0;
-        mScreen.setChar(column, mCursorRow, codePoint, getStyle());
+        mScreen.setChar(column, mCursorRow, codePoint, getStyle(), mCurrentHyperlink);
 
         if (autoWrap && displayWidth > 0)
             mAboutToAutoWrap = (mCursorCol == mRightMargin - displayWidth);
@@ -2536,6 +2601,8 @@ public final class TerminalEmulator {
 
     /** Reset terminal state so user can interact with it regardless of present state. */
     public void reset() {
+        mCurrentHyperlink = null;
+        mInvalidOsc = false;
         setCursorStyle();
         mArgIndex = 0;
         mContinueSequence = false;

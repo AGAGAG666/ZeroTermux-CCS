@@ -11,6 +11,18 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 public class TerminalReferencePathTest {
+    @org.junit.Rule public final org.junit.rules.TemporaryFolder tmp = new org.junit.rules.TemporaryFolder();
+
+    @Test public void confirmsHomeButNotSharedStorageSymlinkOrSibling() throws Exception {
+        java.io.File home = tmp.newFolder("home"), shared = tmp.newFolder("home-shared");
+        java.io.File storage = new java.io.File(home, "storage");
+        assertTrue(storage.mkdir());
+        java.nio.file.Files.createSymbolicLink(new java.io.File(storage, "shared").toPath(), shared.toPath());
+        assertTrue(TerminalReferencePath.isInsideHome(new java.io.File(home, "draft.txt"), home));
+        assertFalse(TerminalReferencePath.isInsideHome(new java.io.File(storage, "shared/photo.png"), home));
+        assertFalse(TerminalReferencePath.isInsideHome(new java.io.File(shared, "photo.png"), home));
+    }
+
     @Test public void acceptsOrdinaryPathsAndQuotesWhenNeeded() {
         assertEquals("/home/中文/截图,1.png", TerminalReferencePath.format("/home/中文/截图,1.png"));
         assertEquals("'/storage/DCIM/截图 (1).png'", TerminalReferencePath.format("/storage/DCIM/截图 (1).png"));

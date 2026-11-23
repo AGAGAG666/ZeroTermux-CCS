@@ -1,31 +1,35 @@
 package com.termux.app.reference;
 
 import android.app.Activity;
+import android.content.ActivityNotFoundException;
+import android.content.ContentResolver;
+import android.content.Intent;
+import android.content.pm.ProviderInfo;
+import android.content.res.AssetFileDescriptor;
+import android.database.Cursor;
+import android.graphics.BitmapFactory;
+import android.net.Uri;
 import android.os.Environment;
-import android.webkit.MimeTypeMap;
+import android.provider.MediaStore;
+import android.provider.OpenableColumns;
 import android.widget.Toast;
-
-import androidx.appcompat.app.AlertDialog;
 
 import com.termux.R;
 import com.termux.shared.termux.TermuxConstants;
 
 import java.io.File;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Locale;
+import java.io.IOException;
+import java.io.InputStream;
 
-/** Browses actual files without importing their contents. */
 public final class TerminalReferencePicker {
+    public static final int REQUEST = 0x63a1;
     public interface Callback { void onPicked(File file); }
 
     private final Activity activity;
     private final boolean imagesOnly;
     private final Callback callback;
-    private AlertDialog dialog;
-    private boolean active = true;
+    private volatile boolean active = true;
+    private android.app.AlertDialog confirmation;
 
     public TerminalReferencePicker(Activity activity, boolean imagesOnly, Callback callback) {
         this.activity = activity;
@@ -33,94 +37,137 @@ public final class TerminalReferencePicker {
         this.callback = callback;
     }
 
-    public void show() { showRoots(); }
-
-    private void showRoots() {
-        if (!active || activity.isFinishing() || activity.isDestroyed()) return;
-        File home = new File(TermuxConstants.TERMUX_HOME_DIR_PATH);
-        File shared = Environment.getExternalStorageDirectory();
-        String[] labels = {activity.getString(R.string.terminal_reference_home),
-            activity.getString(R.string.terminal_reference_shared),
-            activity.getString(R.string.terminal_reference_screenshots)};
-        dialog = new AlertDialog.Builder(activity)
-            .setTitle(R.string.terminal_reference_location)
-            .setItems(labels, (d, which) -> {
-                File root = which == 0 ? home : which == 1 ? shared : new File(shared, "DCIM/Screenshots");
-                if (root.isDirectory() && root.canRead()) browse(root);
-                else {
-                    Toast.makeText(activity, R.string.terminal_reference_unreadable, Toast.LENGTH_LONG).show();
-                    showRoots();
-                }
-            })
-            .setNegativeButton(android.R.string.cancel, (d, which) -> active = false)
-            .create();
-        dialog.show();
+    public void show() {
+        if (imagesOnly) {
+            Intent gallery = new Intent(Intent.ACTION_PICK)
+                .setDataAndType(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, "image/*");
+            try {
+                activity.startActivityForResult(gallery, REQUEST);
+                return;
+            } catch (ActivityNotFoundException ignored) {
+                // Some devices provide only GET_CONTENT for photos.
+            } catch (SecurityException e) {
+                fail();
+                return;
+            }
+        }
+        Intent get = new Intent(Intent.ACTION_GET_CONTENT).addCategory(Intent.CATEGORY_OPENABLE)
+            .setType(imagesOnly ? "image/*" : "*/*");
+        try {
+            activity.startActivityForResult(imagesOnly ? get : Intent.createChooser(get,
+                activity.getString(R.string.terminal_reference_manager)), REQUEST);
+        } catch (ActivityNotFoundException | SecurityException e) {
+            fail();
+        }
     }
 
     public void cancel() {
         active = false;
-        if (dialog != null) dialog.dismiss();
+        if (confirmation != null) confirmation.dismiss();
     }
 
-    private boolean isImage(File file) {
-        String name = file.getName();
-        int dot = name.lastIndexOf('.');
-        if (dot < 0 || dot == name.length() - 1) return false;
-        String mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(name.substring(dot + 1).toLowerCase(Locale.ROOT));
-        return mime != null && mime.startsWith("image/");
+    public void onResult(int result, Intent data) {
+        if (!active) return;
+        if (result != Activity.RESULT_OK) { finish(null); return; }
+        Uri uri = data == null ? null : data.getData();
+        if (uri == null) { fail(); return; }
+        new Thread(() -> {
+            try {
+                File file = resolve(uri).getCanonicalFile();
+                boolean privateHome = TerminalReferencePath.isInsideHome(file, TermuxConstants.TERMUX_HOME_DIR);
+                activity.runOnUiThread(() -> {
+                    if (!active) return;
+                    if (activity.isFinishing() || activity.isDestroyed()) { finish(null); return; }
+                    if (privateHome) {
+                        confirmation = new android.app.AlertDialog.Builder(activity)
+                            .setTitle(R.string.terminal_reference_confirm_home)
+                            .setMessage(file.getPath())
+                            .setPositiveButton(android.R.string.ok, (d, which) -> finish(file))
+                            .setNegativeButton(android.R.string.cancel, (d, which) -> finish(null))
+                            .setOnCancelListener(d -> finish(null)).show();
+                        return;
+                    }
+                    finish(file);
+                    if (cacheRoot().equals(file.getParentFile().getParentFile()))
+                        Toast.makeText(activity, R.string.terminal_reference_copy, Toast.LENGTH_SHORT).show();
+                });
+            } catch (IOException | RuntimeException e) {
+                activity.runOnUiThread(this::fail);
+            }
+        }, "terminal-reference").start();
     }
 
-    private void browse(File dir) {
-        if (!active || activity.isFinishing() || activity.isDestroyed()) return;
-        File[] entries = dir.listFiles();
-        List<File> files = new ArrayList<>();
-        if (entries != null) {
-            for (File file : entries) {
-                if (file.canRead() && (file.isDirectory() || (file.isFile() && (!imagesOnly || isImage(file))))) {
-                    files.add(file);
-                }
+    private File cacheRoot() { return new File(activity.getCacheDir(), "terminal-references"); }
+
+    private File resolve(Uri uri) throws IOException {
+        File shared = Environment.getExternalStorageDirectory().getCanonicalFile();
+        if (ContentResolver.SCHEME_FILE.equals(uri.getScheme())) {
+            if (uri.getPath() == null || uri.getAuthority() != null && !uri.getAuthority().isEmpty())
+                throw new IOException();
+            File f = new File(uri.getPath()).getCanonicalFile();
+            if (!inside(f, shared)) throw new IOException();
+            return check(f);
+        }
+        if (!ContentResolver.SCHEME_CONTENT.equals(uri.getScheme()) || uri.getAuthority() == null)
+            throw new IOException();
+        String authority = uri.getAuthority();
+        if (authority.contains("@")) throw new IOException();
+        ProviderInfo info = activity.getPackageManager().resolveContentProvider(authority, 0);
+        boolean homeProvider = (activity.getPackageName() + ".documents").equals(authority);
+        if (info != null && info.applicationInfo.uid == activity.getApplicationInfo().uid && !homeProvider)
+            throw new IOException();
+        ContentResolver resolver = activity.getContentResolver();
+        try (AssetFileDescriptor fd = resolver.openAssetFileDescriptor(uri, "r")) {
+            if (fd == null) throw new IOException();
+            File direct = null;
+            try {
+                direct = new File("/proc/self/fd/" + fd.getParcelFileDescriptor().getFd()).getCanonicalFile();
+            } catch (IOException ignored) { /* A pipe has no filesystem path. */ }
+            if (direct != null && !homeProvider && TerminalReferencePath.isInsideHome(direct, TermuxConstants.TERMUX_HOME_DIR))
+                throw new IOException();
+            if (direct != null && (inside(direct, shared) || homeProvider && inside(direct, TermuxConstants.TERMUX_HOME_DIR.getCanonicalFile()))
+                && fd.getStartOffset() == 0 && TerminalReferencePath.isReadableFile(direct)
+                && (fd.getDeclaredLength() < 0 || fd.getDeclaredLength() == direct.length()))
+                return check(direct);
+            if (homeProvider) throw new IOException();
+            String name = null;
+            try (Cursor c = resolver.query(uri, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+                if (c != null && c.moveToFirst()) name = c.getString(0);
+            } catch (RuntimeException ignored) { }
+            String ext = android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(resolver.getType(uri));
+            try (InputStream in = fd.createInputStream()) {
+                File copy = ReferenceCopy.save(cacheRoot(), name, ext, in, () -> active);
+                try { return check(copy); }
+                catch (IOException e) { ReferenceCopy.discard(copy); throw e; }
             }
         }
-        Collections.sort(files, new Comparator<File>() {
-            @Override public int compare(File a, File b) {
-                if (a.isDirectory() != b.isDirectory()) return a.isDirectory() ? -1 : 1;
-                return a.getName().compareToIgnoreCase(b.getName());
-            }
-        });
-        List<File> targets = new ArrayList<>();
-        List<String> labels = new ArrayList<>();
-        File parent = dir.getParentFile();
-        if (parent != null && parent.isDirectory() && parent.canRead()) {
-            targets.add(parent);
-            labels.add(activity.getString(R.string.terminal_reference_parent));
+    }
+
+    private static boolean inside(File f, File root) {
+        return f.getPath().startsWith(root.getPath() + File.separator);
+    }
+
+    private File check(File f) throws IOException {
+        if (!active || !TerminalReferencePath.isReadableFile(f)) throw new IOException();
+        if (imagesOnly) {
+            BitmapFactory.Options options = new BitmapFactory.Options();
+            options.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(f.getPath(), options);
+            if (options.outWidth <= 0 || options.outHeight <= 0) throw new IOException();
         }
-        for (File file : files) {
-            targets.add(file);
-            labels.add(file.getName() + (file.isDirectory() ? "/" : ""));
-        }
-        final boolean[] navigating = {false};
-        dialog = new AlertDialog.Builder(activity)
-            .setTitle(dir.getAbsolutePath())
-            .setItems(labels.toArray(new CharSequence[0]), (d, which) -> {
-                File selected = targets.get(which);
-                navigating[0] = true;
-                if (selected.isDirectory() && selected.canRead()) {
-                    browse(selected);
-                } else if (TerminalReferencePath.isReadableFile(selected) && (!imagesOnly || isImage(selected))) {
-                    active = false;
-                    callback.onPicked(selected);
-                } else {
-                    Toast.makeText(activity, R.string.terminal_reference_invalid, Toast.LENGTH_LONG).show();
-                    browse(dir);
-                }
-            })
-            .setNeutralButton(R.string.terminal_reference_location, (d, which) -> {
-                navigating[0] = true;
-                showRoots();
-            })
-            .setNegativeButton(android.R.string.cancel, (d, which) -> active = false)
-            .create();
-        dialog.setOnDismissListener(d -> { if (!navigating[0]) active = false; });
-        dialog.show();
+        return f;
+    }
+
+    private void fail() {
+        if (!active) return;
+        Toast.makeText(activity, R.string.terminal_reference_invalid, Toast.LENGTH_SHORT).show();
+        finish(null);
+    }
+
+    private void finish(File file) {
+        if (!active) return;
+        confirmation = null;
+        active = false;
+        callback.onPicked(file);
     }
 }

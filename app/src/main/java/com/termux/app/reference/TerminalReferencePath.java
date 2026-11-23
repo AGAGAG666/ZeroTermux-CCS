@@ -21,6 +21,10 @@ public final class TerminalReferencePath {
             && isSafe(file.getAbsolutePath());
     }
 
+    static boolean isInsideHome(File file, File home) throws java.io.IOException {
+        return file.getCanonicalPath().startsWith(home.getCanonicalPath() + File.separator);
+    }
+
     public static String format(String path) {
         if (!isSafe(path)) throw new IllegalArgumentException("Invalid path");
         boolean quote = false;

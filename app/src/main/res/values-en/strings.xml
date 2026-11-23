@@ -2048,11 +2048,8 @@ cd ~ &amp;&amp; pkg update -y \n
     <string name="ccs_web_port_saved">Web port saved. Reopen CC Switch to apply</string>
     <string name="terminal_reference_add_file">Add file</string>
     <string name="terminal_reference_add_image">Add image</string>
-    <string name="terminal_reference_parent">../  Parent directory</string>
-    <string name="terminal_reference_invalid">Cannot use this path. Choose a readable file without control characters.</string>
-    <string name="terminal_reference_location">Choose location</string>
-    <string name="terminal_reference_home">Home</string>
-    <string name="terminal_reference_shared">Shared storage</string>
-    <string name="terminal_reference_unreadable">This location is not readable.</string>
-    <string name="terminal_reference_screenshots">Screenshots (DCIM/Screenshots)</string>
+    <string name="terminal_reference_manager">Choose a file manager</string>
+    <string name="terminal_reference_invalid">Cannot read the selected item.</string>
+    <string name="terminal_reference_copy">Selected item has no direct path; using a cached copy.</string>
+    <string name="terminal_reference_confirm_home">Reference this private Termux file?</string>
 </resources>

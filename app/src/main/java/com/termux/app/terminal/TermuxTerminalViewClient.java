@@ -184,8 +184,20 @@ public class TermuxTerminalViewClient extends TermuxTerminalViewClientBase {
 
 
     @Override
+    public boolean supportsLocalFileLinks() {
+        return true;
+    }
+
+    @Override
     public void onSingleTapUp(MotionEvent e) {
-        TerminalEmulator term = mActivity.getCurrentSession().getEmulator();
+        TerminalSession session = mActivity.getCurrentSession();
+        if (session == null || session.getEmulator() == null) return;
+        TerminalEmulator term = session.getEmulator();
+        String file = mActivity.getTerminalView().getTappedFileLink(e);
+        if (file != null) {
+            TerminalFileManager.reveal(mActivity, file);
+            return;
+        }
 
         if (mActivity.getProperties().shouldOpenTerminalTranscriptURLOnClick()) {
             int[] columnAndRow = mActivity.getTerminalView().getColumnAndRow(e, true);

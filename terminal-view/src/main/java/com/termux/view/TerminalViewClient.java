@@ -28,6 +28,9 @@ public interface TerminalViewClient {
      */
     void onSingleTapUp(MotionEvent e);
 
+    /** Hosts that can reveal a local link reserve a tap on it for the Android chooser. */
+    default boolean supportsLocalFileLinks() { return false; }
+
     boolean shouldBackButtonBeMappedToEscape();
 
     boolean shouldEnforceCharBasedInput();

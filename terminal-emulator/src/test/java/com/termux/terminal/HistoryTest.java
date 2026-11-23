@@ -11,10 +11,10 @@ public class HistoryTest extends TerminalTestCase {
 		assertLinesAre("777", "888", "999");
 		assertHistoryStartsWith("666", "555");
 
-		mTerminal.resize(cols, 2);
+		mTerminal.resize(cols, 2, 1, 1);
 		assertHistoryStartsWith("777", "666", "555");
 
-		mTerminal.resize(cols, 3);
+		mTerminal.resize(cols, 3, 1, 1);
 		assertHistoryStartsWith("666", "555");
 	}
 

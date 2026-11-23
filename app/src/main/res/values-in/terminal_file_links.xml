@@ -1,0 +1,5 @@
+<resources>
+    <string name="terminal_file_link_chooser">Buka lokasi berkas · %1$s</string>
+    <string name="terminal_file_link_unavailable">Berkas atau folder tidak dapat diakses</string>
+    <string name="terminal_file_manager_missing">Tidak ada pengelola berkas yang dapat membuka folder ini</string>
+</resources>
